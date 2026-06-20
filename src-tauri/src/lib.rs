@@ -35,6 +35,7 @@ pub fn run() {
             game: Mutex::new(game_state::GameState::new(19)),
             engine: Mutex::new(None),
             difficulty: Mutex::new(3),
+            analysis_engine: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::play_move,
@@ -55,6 +56,10 @@ pub fn run() {
             commands::record_weakness,
             commands::next_guess,
             commands::check_guess,
+            commands::start_analysis_engine,
+            commands::stop_analysis_engine,
+            commands::analysis_engine_status,
+            commands::import_and_analyze,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

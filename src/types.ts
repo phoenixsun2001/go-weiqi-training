@@ -75,3 +75,21 @@ export interface GuessResult {
   answer_vertex: string;
   explanation: string;
 }
+
+// 复盘分析
+export interface MoveAnalysisDto {
+  move_index: number;
+  best_winrate: number;
+  played_winrate: number;
+  loss: number;
+  kind: "good" | "inaccuracy" | "blunder";
+  best_move: string;
+  category: string;
+}
+
+export interface AnalysisReport {
+  moves: MoveAnalysisDto[];
+  winrate_curve: number[];
+  blunder_count: number;
+  inaccuracy_count: number;
+}

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AiMoveResult,
+  AnalysisReport,
   BoardSnapshot,
   EngineStatus,
   GuessDto,
@@ -52,6 +53,18 @@ export const ipc = {
   nextGuess: () => invoke<GuessDto | null>("next_guess"),
   checkGuess: (problemId: number, userGuess: string) =>
     invoke<GuessResult>("check_guess", { args: { problem_id: problemId, user_guess: userGuess } }),
+
+  // 复盘分析
+  startAnalysisEngine: (binaryPath: string, args: string[]) =>
+    invoke<{ running: boolean }>("start_analysis_engine", {
+      args: { binary_path: binaryPath, args },
+    }),
+  stopAnalysisEngine: () => invoke<void>("stop_analysis_engine"),
+  analysisEngineStatus: () => invoke<{ running: boolean }>("analysis_engine_status"),
+  importAndAnalyze: (sgf: string, threshold?: number) =>
+    invoke<AnalysisReport>("import_and_analyze", {
+      args: { sgf, threshold: threshold ?? null },
+    }),
 };
 
 type Color = import("../types").Color;

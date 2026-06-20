@@ -4,6 +4,8 @@ use crate::local_store::LocalStore;
 use crate::opponent_ai::dan_to_max_visits;
 use crate::problem_db::{Category, ProblemDb};
 use crate::rating_service;
+use crate::review_pipeline::{analyze_game, MoveKind};
+use crate::sgf;
 use crate::engine_manager::EngineHandle;
 use crate::coords::{gtp_to_xy, xy_to_gtp};
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,8 @@ pub struct AppState {
     pub engine: Mutex<Option<EngineHandle>>,
     /// 当前对手目标段位（1..=5+），用于调整 maxVisits
     pub difficulty: Mutex<i32>,
+    /// KataGo 分析引擎（用于复盘分析，与对手引擎独立）
+    pub analysis_engine: Mutex<Option<EngineHandle>>,
 }
 
 #[derive(Serialize)]
@@ -466,6 +470,187 @@ pub fn check_guess(state: State<AppState>, args: CheckGuessArgs) -> Result<Guess
         answer_vertex: problem.answer_vertex,
         explanation: problem.explanation,
     })
+}
+
+// ============ 复盘分析端到端 ============
+
+#[derive(Deserialize)]
+pub struct StartAnalysisEngineArgs {
+    pub binary_path: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct AnalysisEngineStatus {
+    pub running: bool,
+}
+
+/// 启动复盘分析引擎（独立于对战引擎）
+#[tauri::command]
+pub fn start_analysis_engine(
+    state: State<AppState>,
+    args: StartAnalysisEngineArgs,
+) -> Result<AnalysisEngineStatus, AppError> {
+    let arg_refs: Vec<&str> = args.args.iter().map(|s| s.as_str()).collect();
+    let handle = EngineHandle::spawn(&args.binary_path, &arg_refs)?;
+    let size = state.game.lock().unwrap().size();
+    let _ = handle.command(&format!("boardsize {size}"));
+    *state.analysis_engine.lock().unwrap() = Some(handle);
+    Ok(AnalysisEngineStatus { running: true })
+}
+
+#[tauri::command]
+pub fn stop_analysis_engine(state: State<AppState>) -> Result<(), AppError> {
+    state.analysis_engine.lock().unwrap().take();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn analysis_engine_status(state: State<AppState>) -> Result<AnalysisEngineStatus, AppError> {
+    Ok(AnalysisEngineStatus {
+        running: state.analysis_engine.lock().unwrap().is_some(),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct ImportAndAnalyzeArgs {
+    pub sgf: String,
+    /// 失误判定阈值（胜率损失，0..1），默认 0.03
+    pub threshold: Option<f64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct MoveAnalysisDto {
+    pub move_index: usize,
+    pub best_winrate: f64,
+    pub played_winrate: f64,
+    pub loss: f64,
+    pub kind: String, // "good" | "inaccuracy" | "blunder"
+    pub best_move: String,
+    pub category: String, // 阶段映射的分类标签
+}
+
+#[derive(Serialize)]
+pub struct AnalysisReport {
+    pub moves: Vec<MoveAnalysisDto>,
+    pub winrate_curve: Vec<f64>, // 每手黑方胜率 0..1
+    pub blunder_count: usize,
+    pub inaccuracy_count: usize,
+}
+
+/// 导入 SGF 棋谱并逐手分析：跑真实 KataGo、生成胜率曲线与失误标记，
+/// 同时按失误阶段自动写入弱点统计表（驱动针对性题库出题）。
+#[tauri::command]
+pub fn import_and_analyze(
+    state: State<AppState>,
+    args: ImportAndAnalyzeArgs,
+) -> Result<AnalysisReport, AppError> {
+    let moves = sgf::parse_moves(&args.sgf)?;
+    if moves.is_empty() {
+        return Err(AppError::Rule("棋谱无着手".into()));
+    }
+    let size = extract_size(&args.sgf);
+    let threshold = args.threshold.unwrap_or(0.03);
+
+    // 推断棋盘大小
+    let engine_guard = state.analysis_engine.lock().unwrap();
+    let engine = engine_guard
+        .as_ref()
+        .ok_or_else(|| AppError::Engine("复盘分析引擎未启动，请先在复盘页启动 KataGo".into()))?;
+
+    let analyses = analyze_game(engine, size, &moves, threshold)?;
+
+    // 把分析结果写入弱点表（按阶段映射分类），并构造 DTO
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let total = moves.len();
+    let mut dtos = Vec::with_capacity(analyses.len());
+    let mut winrate_curve = Vec::with_capacity(analyses.len());
+    let mut blunder_count = 0usize;
+    let mut inaccuracy_count = 0usize;
+
+    for a in &analyses {
+        let kind = a.kind;
+        if kind == MoveKind::Blunder {
+            blunder_count += 1;
+        } else if kind == MoveKind::Inaccuracy {
+            inaccuracy_count += 1;
+        }
+        // 仅对失误/疑问手记录弱点
+        if kind != MoveKind::Good {
+            let cat = phase_to_category(a.move_index, total, size);
+            let _ = db.add_weakness(cat, kind == MoveKind::Blunder);
+        }
+        winrate_curve.push(a.played_winrate);
+        dtos.push(MoveAnalysisDto {
+            move_index: a.move_index,
+            best_winrate: a.best_winrate,
+            played_winrate: a.played_winrate,
+            loss: a.best_winrate - a.played_winrate,
+            kind: move_kind_str(kind).into(),
+            best_move: a.best_move.clone(),
+            category: phase_to_category(a.move_index, total, size).label().into(),
+        });
+    }
+
+    Ok(AnalysisReport {
+        moves: dtos,
+        winrate_curve,
+        blunder_count,
+        inaccuracy_count,
+    })
+}
+
+fn move_kind_str(k: MoveKind) -> &'static str {
+    match k {
+        MoveKind::Good => "good",
+        MoveKind::Inaccuracy => "inaccuracy",
+        MoveKind::Blunder => "blunder",
+    }
+}
+
+/// 按手数阶段映射到训练分类（驱动弱点出题）。
+/// 布局期 -> fuseki；中盘 -> tesuji（手筋）；官子 -> endgame。
+/// 死活类（tsumego）较难从手数阶段区分，这里中盘统一归 tesuji。
+fn phase_to_category(move_index: usize, total: usize, _size: usize) -> Category {
+    let frac = if total == 0 { 1.0 } else { move_index as f64 / total as f64 };
+    if frac < 0.33 {
+        Category::Fuseki
+    } else if frac < 0.75 {
+        Category::Tesuji
+    } else {
+        Category::Endgame
+    }
+}
+
+fn extract_size(sgf: &str) -> usize {
+    sgf.match_indices("SZ[")
+        .next()
+        .and_then(|(i, _)| {
+            let rest = &sgf[i + 3..];
+            rest.find(']').and_then(|end| rest[..end].parse::<usize>().ok())
+        })
+        .unwrap_or(19)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phase_mapping_layout_midgame_endgame() {
+        assert_eq!(phase_to_category(0, 100, 19), Category::Fuseki);
+        assert_eq!(phase_to_category(32, 100, 19), Category::Fuseki);
+        assert_eq!(phase_to_category(50, 100, 19), Category::Tesuji);
+        assert_eq!(phase_to_category(80, 100, 19), Category::Endgame);
+    }
+
+    #[test]
+    fn extract_size_from_sgf() {
+        assert_eq!(extract_size("(;GM[1]SZ[9];B[ee])"), 9);
+        assert_eq!(extract_size("(;GM[1]SZ[19])"), 19);
+        assert_eq!(extract_size("(;GM[1])"), 19); // 默认
+    }
 }
 
 

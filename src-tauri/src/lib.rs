@@ -5,6 +5,7 @@ pub mod error;
 pub mod game_state;
 pub mod local_store;
 pub mod opponent_ai;
+pub mod problem_db;
 pub mod rating_service;
 pub mod review_pipeline;
 pub mod sgf;
@@ -21,6 +22,11 @@ pub fn run() {
     // 首次启动创建默认档案
     if store.load_profile().unwrap().is_none() {
         store.upsert_profile("棋手", 1500).unwrap();
+    }
+    // 首次启动写入示例题库
+    {
+        let conn = store.conn_ref();
+        let _ = problem_db::seed_if_empty(conn);
     }
 
     tauri::Builder::default()
@@ -42,6 +48,11 @@ pub fn run() {
             commands::engine_status,
             commands::set_difficulty,
             commands::ai_move,
+            commands::next_problem,
+            commands::submit_answer,
+            commands::wrong_book,
+            commands::weakness_report,
+            commands::record_weakness,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

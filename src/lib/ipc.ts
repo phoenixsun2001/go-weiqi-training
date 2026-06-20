@@ -4,7 +4,11 @@ import type {
   BoardSnapshot,
   EngineStatus,
   PlayResult,
+  ProblemDto,
   StartEngineArgs,
+  SubmitResult,
+  WeaknessDto,
+  WrongBookDto,
 } from "../types";
 
 export const ipc = {
@@ -32,6 +36,15 @@ export const ipc = {
   setDifficulty: (difficulty: number) =>
     invoke<void>("set_difficulty", { difficulty }),
   aiMove: (userColor: Color) => invoke<AiMoveResult>("ai_move", { args: { user_color: userColor } }),
+
+  // 题库训练
+  nextProblem: () => invoke<ProblemDto | null>("next_problem"),
+  submitAnswer: (problemId: number, userAnswer: string) =>
+    invoke<SubmitResult>("submit_answer", { args: { problem_id: problemId, user_answer: userAnswer } }),
+  wrongBook: () => invoke<WrongBookDto[]>("wrong_book"),
+  weaknessReport: () => invoke<WeaknessDto[]>("weakness_report"),
+  recordWeakness: (category: string, blunder: boolean) =>
+    invoke<void>("record_weakness", { args: { category, blunder } }),
 };
 
 type Color = import("../types").Color;

@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::game_state::{Color, GameState};
 use crate::local_store::LocalStore;
 use crate::opponent_ai::dan_to_max_visits;
+use crate::problem_db::{Category, ProblemDb};
 use crate::rating_service;
 use crate::engine_manager::EngineHandle;
 use crate::coords::{gtp_to_xy, xy_to_gtp};
@@ -266,3 +267,143 @@ fn color_str(c: Color) -> String {
 fn _keep_xy_to_gtp(x: usize, y: usize, size: usize) -> AppResult<String> {
     xy_to_gtp(x, y, size)
 }
+
+// ============ 题库训练模块 ============
+
+#[derive(Serialize)]
+pub struct ProblemDto {
+    pub id: i64,
+    pub category: String,
+    pub category_label: String,
+    pub difficulty: i32,
+    pub question_sgf: String,
+    pub explanation: String,
+}
+
+/// 取下一道题（弱点驱动的针对性选题）
+#[tauri::command]
+pub fn next_problem(state: State<AppState>) -> Result<Option<ProblemDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let profile = store.load_profile()?.ok_or_else(|| AppError::Rule("无用户档案".into()))?;
+    // 难度上限跟随用户段位（跳一跳够得着）
+    let max_diff = rating_service::dan_from_elo(profile.elo) + 1;
+    let db = ProblemDb::new(store.conn_ref());
+    let row = db.next_problem(max_diff)?;
+    Ok(row.map(|p| ProblemDto {
+        id: p.id,
+        category: p.category.clone(),
+        category_label: Category::from_str(&p.category)
+            .map(|c| c.label().to_string())
+            .unwrap_or(p.category),
+        difficulty: p.difficulty,
+        question_sgf: p.question_sgf,
+        explanation: p.explanation,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct SubmitAnswerArgs {
+    pub problem_id: i64,
+    pub user_answer: String,
+}
+
+#[derive(Serialize)]
+pub struct SubmitResult {
+    pub correct: bool,
+    pub answer_vertex: String,
+}
+
+#[tauri::command]
+pub fn submit_answer(
+    state: State<AppState>,
+    args: SubmitAnswerArgs,
+) -> Result<SubmitResult, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let correct = db.submit_answer(args.problem_id, &args.user_answer)?;
+    // 回填正确答案供解析展示
+    let problem = db
+        .get_problem(args.problem_id)?
+        .ok_or_else(|| AppError::Rule("题目不存在".into()))?;
+    Ok(SubmitResult {
+        correct,
+        answer_vertex: problem.answer_vertex,
+    })
+}
+
+#[derive(Serialize)]
+pub struct WrongBookDto {
+    pub id: i64,
+    pub problem_id: i64,
+    pub user_answer: String,
+    pub correct: bool,
+    pub attempted_at: String,
+}
+
+#[tauri::command]
+pub fn wrong_book(state: State<AppState>) -> Result<Vec<WrongBookDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let rows = db.list_wrong_book(50)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| WrongBookDto {
+            id: r.id,
+            problem_id: r.problem_id,
+            user_answer: r.user_answer,
+            correct: r.correct,
+            attempted_at: r.attempted_at,
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+pub struct WeaknessDto {
+    pub category: String,
+    pub category_label: String,
+    pub blunder_count: i32,
+    pub inaccuracy_count: i32,
+}
+
+#[tauri::command]
+pub fn weakness_report(state: State<AppState>) -> Result<Vec<WeaknessDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let rows = db.list_weakness()?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let label = Category::from_str(&r.category)
+                .map(|c| c.label().to_string())
+                .unwrap_or_else(|_| r.category.clone());
+            WeaknessDto {
+                category: r.category,
+                category_label: label,
+                blunder_count: r.blunder_count,
+                inaccuracy_count: r.inaccuracy_count,
+            }
+        })
+        .collect())
+}
+
+/// 供复盘管线把失误写入弱点统计（按手数阶段映射分类）。
+#[derive(Deserialize)]
+pub struct RecordWeaknessArgs {
+    /// 'fuseki' | 'tsumego' | 'tesuji' | 'endgame'
+    pub category: String,
+    /// 是否严重失误
+    pub blunder: bool,
+}
+
+#[tauri::command]
+pub fn record_weakness(
+    state: State<AppState>,
+    args: RecordWeaknessArgs,
+) -> Result<(), AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let cat = Category::from_str(&args.category)?;
+    db.add_weakness(cat, args.blunder)?;
+    Ok(())
+}
+

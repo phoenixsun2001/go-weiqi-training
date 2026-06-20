@@ -1,8 +1,9 @@
 import { useState } from "react";
 import GameView from "./views/GameView";
 import ReviewView from "./views/ReviewView";
+import ProblemView from "./views/ProblemView";
 
-type Tab = "game" | "review";
+type Tab = "game" | "review" | "problem";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("game");
@@ -19,16 +20,18 @@ export default function App() {
         <strong>围棋棋力训练</strong>
         <nav style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => setTab("game")} style={tabBtn(tab === "game")}>
-            对战 ✅
+            对战
           </button>
           <button onClick={() => setTab("review")} style={tabBtn(tab === "review")}>
             复盘
           </button>
-          <span style={{ color: "#999" }}>题库（建设中）</span>
+          <button onClick={() => setTab("problem")} style={tabBtn(tab === "problem")}>
+            题库
+          </button>
           <span style={{ color: "#999" }}>猜棋（建设中）</span>
         </nav>
       </header>
-      {tab === "game" ? <GameView /> : <ReviewView />}
+      {tab === "game" ? <GameView /> : tab === "review" ? <ReviewView /> : <ProblemView />}
     </div>
   );
 }

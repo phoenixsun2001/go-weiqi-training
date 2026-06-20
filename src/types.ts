@@ -31,3 +31,33 @@ export interface StartEngineArgs {
   args: string[];
   difficulty: number;
 }
+
+// 题库训练
+export interface ProblemDto {
+  id: number;
+  category: string;
+  category_label: string;
+  difficulty: number;
+  question_sgf: string;
+  explanation: string;
+}
+
+export interface SubmitResult {
+  correct: boolean;
+  answer_vertex: string;
+}
+
+export interface WrongBookDto {
+  id: number;
+  problem_id: number;
+  user_answer: string;
+  correct: boolean;
+  attempted_at: string;
+}
+
+export interface WeaknessDto {
+  category: string;
+  category_label: string;
+  blunder_count: number;
+  inaccuracy_count: number;
+}

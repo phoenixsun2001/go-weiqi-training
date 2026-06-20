@@ -29,6 +29,11 @@ impl LocalStore {
         })
     }
 
+    /// 暴露内部连接引用，供 problem_db 等模块共享同一数据库
+    pub fn conn_ref(&self) -> &Mutex<Connection> {
+        &self.conn
+    }
+
     pub fn upsert_profile(&self, name: &str, elo: i32) -> AppResult<()> {
         let conn = self.conn.lock().unwrap();
         let now = now_iso();

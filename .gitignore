@@ -3,3 +3,4 @@
 /src-tauri/target
 *.log
 training.db
+.dev-port

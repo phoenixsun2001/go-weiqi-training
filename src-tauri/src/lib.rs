@@ -27,6 +27,8 @@ pub fn run() {
         .manage(AppState {
             store: Mutex::new(store),
             game: Mutex::new(game_state::GameState::new(19)),
+            engine: Mutex::new(None),
+            difficulty: Mutex::new(3),
         })
         .invoke_handler(tauri::generate_handler![
             commands::play_move,
@@ -35,6 +37,11 @@ pub fn run() {
             commands::record_game,
             commands::get_elo,
             commands::new_game,
+            commands::start_engine,
+            commands::stop_engine,
+            commands::engine_status,
+            commands::set_difficulty,
+            commands::ai_move,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

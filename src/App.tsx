@@ -19,7 +19,7 @@ export default function App() {
         <strong>围棋棋力训练</strong>
         <nav style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => setTab("game")} style={tabBtn(tab === "game")}>
-            对战
+            对战 ✅
           </button>
           <button onClick={() => setTab("review")} style={tabBtn(tab === "review")}>
             复盘

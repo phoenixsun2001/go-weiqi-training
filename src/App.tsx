@@ -2,8 +2,9 @@ import { useState } from "react";
 import GameView from "./views/GameView";
 import ReviewView from "./views/ReviewView";
 import ProblemView from "./views/ProblemView";
+import GuessView from "./views/GuessView";
 
-type Tab = "game" | "review" | "problem";
+type Tab = "game" | "review" | "problem" | "guess";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("game");
@@ -28,10 +29,20 @@ export default function App() {
           <button onClick={() => setTab("problem")} style={tabBtn(tab === "problem")}>
             题库
           </button>
-          <span style={{ color: "#999" }}>猜棋（建设中）</span>
+          <button onClick={() => setTab("guess")} style={tabBtn(tab === "guess")}>
+            猜棋
+          </button>
         </nav>
       </header>
-      {tab === "game" ? <GameView /> : tab === "review" ? <ReviewView /> : <ProblemView />}
+      {tab === "game" ? (
+        <GameView />
+      ) : tab === "review" ? (
+        <ReviewView />
+      ) : tab === "problem" ? (
+        <ProblemView />
+      ) : (
+        <GuessView />
+      )}
     </div>
   );
 }

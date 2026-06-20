@@ -3,6 +3,8 @@ import type {
   AiMoveResult,
   BoardSnapshot,
   EngineStatus,
+  GuessDto,
+  GuessResult,
   PlayResult,
   ProblemDto,
   StartEngineArgs,
@@ -45,6 +47,11 @@ export const ipc = {
   weaknessReport: () => invoke<WeaknessDto[]>("weakness_report"),
   recordWeakness: (category: string, blunder: boolean) =>
     invoke<void>("record_weakness", { args: { category, blunder } }),
+
+  // 猜棋训练
+  nextGuess: () => invoke<GuessDto | null>("next_guess"),
+  checkGuess: (problemId: number, userGuess: string) =>
+    invoke<GuessResult>("check_guess", { args: { problem_id: problemId, user_guess: userGuess } }),
 };
 
 type Color = import("../types").Color;

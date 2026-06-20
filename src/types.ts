@@ -61,3 +61,17 @@ export interface WeaknessDto {
   blunder_count: number;
   inaccuracy_count: number;
 }
+
+// 猜棋训练
+export interface GuessDto {
+  id: number;
+  category_label: string;
+  difficulty: number;
+  position_sgf: string;
+}
+
+export interface GuessResult {
+  correct: boolean;
+  answer_vertex: string;
+  explanation: string;
+}

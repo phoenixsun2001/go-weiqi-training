@@ -53,6 +53,8 @@ pub fn run() {
             commands::wrong_book,
             commands::weakness_report,
             commands::record_weakness,
+            commands::next_guess,
+            commands::check_guess,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

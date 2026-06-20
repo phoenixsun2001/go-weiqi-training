@@ -407,3 +407,65 @@ pub fn record_weakness(
     Ok(())
 }
 
+// ============ 猜棋训练模块 ============
+
+#[derive(Serialize)]
+pub struct GuessDto {
+    pub id: i64,
+    pub category_label: String,
+    pub difficulty: i32,
+    pub position_sgf: String,
+}
+
+/// 取一道猜棋题（隐藏正解）。难度上限跟随用户段位。
+#[tauri::command]
+pub fn next_guess(state: State<AppState>) -> Result<Option<GuessDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let profile = store.load_profile()?.ok_or_else(|| AppError::Rule("无用户档案".into()))?;
+    let max_diff = rating_service::dan_from_elo(profile.elo) + 1;
+    let db = ProblemDb::new(store.conn_ref());
+    let row = db.next_problem(max_diff)?;
+    Ok(row.map(|p| GuessDto {
+        id: p.id,
+        category_label: Category::from_str(&p.category)
+            .map(|c| c.label().to_string())
+            .unwrap_or(p.category),
+        difficulty: p.difficulty,
+        position_sgf: p.question_sgf,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct CheckGuessArgs {
+    pub problem_id: i64,
+    pub user_guess: String,
+}
+
+#[derive(Serialize)]
+pub struct GuessResult {
+    pub correct: bool,
+    /// 正解顶点（多个用空格）
+    pub answer_vertex: String,
+    /// 用户答案是否落在 top 候选（这里简单用精确匹配）
+    pub explanation: String,
+}
+
+#[tauri::command]
+pub fn check_guess(state: State<AppState>, args: CheckGuessArgs) -> Result<GuessResult, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+    let problem = db
+        .get_problem(args.problem_id)?
+        .ok_or_else(|| AppError::Rule("题目不存在".into()))?;
+    let correct = problem
+        .answer_vertex
+        .split_whitespace()
+        .any(|a| a.eq_ignore_ascii_case(args.user_guess.trim()));
+    Ok(GuessResult {
+        correct,
+        answer_vertex: problem.answer_vertex,
+        explanation: problem.explanation,
+    })
+}
+
+

@@ -34,6 +34,8 @@ export default function GameView() {
   const [territory, setTerritory] = useState<TerritoryEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [startingEngine, setStartingEngine] = useState(false);
+  const [engineProgress, setEngineProgress] = useState(0);
 
   useEffect(() => {
     refresh();
@@ -62,12 +64,33 @@ export default function GameView() {
   };
 
   const handleAutoStart = async () => {
+    setStartingEngine(true);
+    setEngineProgress(10);
+    setInstallMsg("正在启动 KataGo 引擎…");
+    // 阶段性进度提示（引擎启动期间 OpenCL 初始化/tuning 可能耗时数秒）
+    const stages = [
+      { delay: 800, progress: 25, msg: "正在加载神经网络权重…" },
+      { delay: 1600, progress: 45, msg: "正在初始化 OpenCL GPU 后端…" },
+      { delay: 3000, progress: 65, msg: "正在自动调优 GPU 参数（首次较慢）…" },
+      { delay: 6000, progress: 80, msg: "正在配置棋盘与难度…" },
+    ];
+    const timers = stages.map((s) =>
+      setTimeout(() => {
+        setEngineProgress(s.progress);
+        setInstallMsg(s.msg);
+      }, s.delay)
+    );
     try {
       const s = await ipc.autoStartEngine(difficulty);
+      timers.forEach((t) => clearTimeout(t));
+      setEngineProgress(100);
       await refreshEngineStatus();
       setInstallMsg(`✓ AI 引擎已启动（业余${s.difficulty}段）`);
     } catch (e) {
+      timers.forEach((t) => clearTimeout(t));
       setInstallMsg(`启动失败：${e}`);
+    } finally {
+      setStartingEngine(false);
     }
   };
 
@@ -174,17 +197,62 @@ export default function GameView() {
               </select>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ marginBottom: 8 }}>
               {!engineRunning ? (
                 <button
                   onClick={handleAutoStart}
-                  disabled={!katagoInstalled}
+                  disabled={!katagoInstalled || startingEngine}
                   title={!katagoInstalled ? "请先安装 KataGo" : ""}
+                  style={{ width: "100%" }}
                 >
-                  一键启动 AI 对战
+                  {startingEngine ? "启动中…" : "一键启动 AI 对战"}
                 </button>
               ) : (
-                <button onClick={() => stopEngine()}>停止引擎</button>
+                <button onClick={() => stopEngine()} style={{ width: "100%" }}>
+                  停止引擎
+                </button>
+              )}
+              {/* 进度条 */}
+              {startingEngine && (
+                <div style={{ marginTop: 8 }}>
+                  <div
+                    style={{
+                      height: 20,
+                      background: "#f0f0f0",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      position: "relative",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${engineProgress}%`,
+                        height: "100%",
+                        background: "linear-gradient(90deg, #1890ff, #36cfc9)",
+                        borderRadius: 10,
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 20,
+                        lineHeight: "20px",
+                        textAlign: "center",
+                        fontSize: 11,
+                        color: "#333",
+                      }}
+                    >
+                      {engineProgress}%
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 12, color: "#1890ff", margin: "4px 0 0", textAlign: "center" }}>
+                    {installMsg}
+                  </p>
+                </div>
               )}
             </div>
 

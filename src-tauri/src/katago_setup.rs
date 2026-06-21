@@ -1,22 +1,44 @@
 use crate::error::{AppError, AppResult};
 use std::path::{Path, PathBuf};
 
-/// KataGo 安装目录：优先找 src-tauri/katago（开发期手动放置），其次 cwd/katago
+/// KataGo 安装目录：
+/// 1. exe 同级目录下的 katago/（release 模式）
+/// 2. exe 上级 src-tauri/katago/（dev 模式，exe 在 target/release 或 target/debug）
+/// 3. cwd/katago 或 cwd/src-tauri/katago（兼容旧路径）
 pub fn katago_dir() -> PathBuf {
+    let mut candidates: Vec<PathBuf> = vec![];
+
+    // 从 exe 路径推断
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            // exe 同级 katago/（release）
+            candidates.push(exe_dir.join("katago"));
+            // exe 在 target/release 或 target/debug，上级 src-tauri/katago（dev）
+            if let Some(target_dir) = exe_dir.parent() {
+                if let Some(project_dir) = target_dir.parent() {
+                    candidates.push(project_dir.join("katago"));
+                    candidates.push(project_dir.join("src-tauri").join("katago"));
+                }
+            }
+        }
+    }
+
+    // 从 cwd 推断
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    // 候选：src-tauri/katago（Tauri dev 运行时 cwd=src-tauri，手动放置的文件在这里）
-    let candidate = cwd.join("katago");
-    if candidate.join("katago.exe").exists() {
-        return candidate;
+    candidates.push(cwd.join("katago"));
+    candidates.push(cwd.join("src-tauri").join("katago"));
+
+    // 返回第一个含 katago.exe 的
+    for c in &candidates {
+        if c.join("katago.exe").exists() {
+            return c.clone();
+        }
     }
-    // 也有可能 cwd 是项目根，文件在 src-tauri/katago
-    let candidate2 = cwd.join("src-tauri").join("katago");
-    if candidate2.join("katago.exe").exists() {
-        return candidate2;
-    }
-    // 都没有则返回默认（用于安装）
-    let _ = std::fs::create_dir_all(&candidate);
-    candidate
+
+    // 默认：exe 同级 katago/
+    let default = candidates.into_iter().next().unwrap_or_else(|| cwd.join("katago"));
+    let _ = std::fs::create_dir_all(&default);
+    default
 }
 
 pub fn katago_binary_path() -> PathBuf {

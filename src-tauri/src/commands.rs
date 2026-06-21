@@ -1034,12 +1034,14 @@ pub fn install_katago() -> Result<String, AppError> {
 #[tauri::command]
 pub fn auto_start_engine(state: State<AppState>, difficulty: i32) -> Result<EngineStatus, AppError> {
     let binary = crate::katago_setup::katago_binary_path();
-    let args = crate::katago_setup::gtp_args();
     if !binary.exists() {
         return Err(AppError::Engine(
             "KataGo 尚未安装，请先点击一键安装".into(),
         ));
     }
+    // 确保优化配置存在（低内存、无日志文件，避免崩溃）
+    let _ = crate::katago_setup::ensure_config();
+    let args = crate::katago_setup::gtp_args();
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let handle = EngineHandle::spawn(&binary.to_string_lossy(), &arg_refs)?;
     let size = state.game.lock().unwrap().size();
@@ -1058,12 +1060,13 @@ pub fn auto_start_engine(state: State<AppState>, difficulty: i32) -> Result<Engi
 #[tauri::command]
 pub fn auto_start_analysis_engine(state: State<AppState>) -> Result<AnalysisEngineStatus, AppError> {
     let binary = crate::katago_setup::katago_binary_path();
-    let args = crate::katago_setup::gtp_args();
     if !binary.exists() {
         return Err(AppError::Engine(
             "KataGo 尚未安装，请先点击一键安装".into(),
         ));
     }
+    let _ = crate::katago_setup::ensure_config();
+    let args = crate::katago_setup::gtp_args();
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let handle = EngineHandle::spawn(&binary.to_string_lossy(), &arg_refs)?;
     let size = state.game.lock().unwrap().size();

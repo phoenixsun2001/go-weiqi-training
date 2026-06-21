@@ -58,7 +58,13 @@ pub fn katago_model_path() -> PathBuf {
 }
 
 pub fn katago_config_path() -> PathBuf {
-    katago_dir().join("default_gtp.cfg")
+    let dir = katago_dir();
+    // 优先用我们生成的优化配置（低内存、无日志文件）
+    let optimized = dir.join("gtp_optimized.cfg");
+    if optimized.exists() {
+        return optimized;
+    }
+    optimized
 }
 
 /// 检查 KataGo 是否已安装（二进制 + 权重 + 配置齐全）
@@ -66,6 +72,15 @@ pub fn is_installed() -> bool {
     katago_binary_path().exists()
         && katago_model_path().exists()
         && katago_config_path().exists()
+}
+
+/// 确保优化配置存在（每次启动时调用）
+pub fn ensure_config() -> AppResult<()> {
+    let path = katago_config_path();
+    if !path.exists() {
+        generate_config()?;
+    }
+    Ok(())
 }
 
 /// 下载单个文件到指定路径（带 User-Agent，避免被部分服务器拒绝）

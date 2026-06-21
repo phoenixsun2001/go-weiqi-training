@@ -5,10 +5,11 @@ interface Props {
   snapshot: BoardSnapshot;
   onPlay?: (x: number, y: number) => void;
   interactive: boolean;
-  /** 最大像素尺寸；不传则自适应容器宽度 */
   size?: number;
   showCoords?: boolean;
   marks?: { x: number; y: number; label: string; color?: string }[];
+  /** 最新一手棋的坐标，在棋子下方画红色三角标记 */
+  lastMove?: { x: number; y: number } | null;
 }
 
 export default function Board({
@@ -18,6 +19,7 @@ export default function Board({
   size,
   showCoords = true,
   marks = [],
+  lastMove = null,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 当前尺寸档位索引
@@ -113,6 +115,21 @@ export default function Board({
       }
     }
 
+    // 最新一手棋：红色小三角标记
+    if (lastMove && lastMove.x >= 0 && lastMove.x < n && lastMove.y >= 0 && lastMove.y < n) {
+      const cx = margin + cell * (lastMove.x + 0.5);
+      const cy = margin + cell * (lastMove.y + 0.5);
+      const r = cell * 0.18;
+      // 红色等边三角形（向下），画在棋子下方偏移位置
+      ctx.fillStyle = "#e22";
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + r);         // 上顶点
+      ctx.lineTo(cx - r, cy + r * 2.4); // 左下
+      ctx.lineTo(cx + r, cy + r * 2.4); // 右下
+      ctx.closePath();
+      ctx.fill();
+    }
+
     // 标记
     for (const m of marks) {
       if (m.x < 0 || m.x >= n || m.y < 0 || m.y >= n) continue;
@@ -124,7 +141,7 @@ export default function Board({
       ctx.fillStyle = m.color ?? "#e22";
       ctx.fillText(m.label, cx, cy);
     }
-  }, [snapshot, renderSize, showCoords, marks]);
+  }, [snapshot, renderSize, showCoords, marks, lastMove]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive || !onPlay) return;

@@ -25,6 +25,7 @@ export default function GameView() {
     setDifficulty,
     stopEngine,
     refreshEngineStatus,
+    lastMove,
   } = useGameStore();
 
   const [katagoInstalled, setKatagoInstalled] = useState<boolean | null>(null);
@@ -71,7 +72,7 @@ export default function GameView() {
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 300 }}>
-        <Board snapshot={snapshot} onPlay={(x, y) => play(x, y)} interactive={!loading && !aiThinking} showCoords />
+        <Board snapshot={snapshot} onPlay={(x, y) => play(x, y)} interactive={!loading && !aiThinking} showCoords lastMove={lastMove} />
       </div>
       <div style={{ minWidth: 280, width: 320, flexShrink: 1, overflowY: "auto", maxHeight: "calc(100vh - 100px)" }}>
         <h2>对战练习</h2>

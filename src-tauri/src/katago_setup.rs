@@ -29,13 +29,14 @@ pub fn is_installed() -> bool {
         && katago_config_path().exists()
 }
 
-/// 下载单个文件到指定路径
+/// 下载单个文件到指定路径（带 User-Agent，避免被部分服务器拒绝）
 fn download(url: &str, dest: &Path) -> AppResult<()> {
-    // 用 PowerShell 下载（Windows 原生，无需额外依赖）
     let dest_str = dest.to_string_lossy();
     let ps_script = format!(
         "try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
-         Invoke-WebRequest -Uri '{}' -OutFile '{}' -UseBasicParsing; \
+         $ProgressPreference='SilentlyContinue'; \
+         $h=@{{'User-Agent'='Mozilla/5.0'}}; \
+         Invoke-WebRequest -Uri '{}' -OutFile '{}' -UseBasicParsing -Headers $h -TimeoutSec 600; \
          Write-Output 'OK' }} catch {{ Write-Error $_.Exception.Message; exit 1 }}",
         url, dest_str
     );
@@ -129,10 +130,9 @@ pub fn install() -> AppResult<String> {
         return Ok("已安装".into());
     }
 
-    // 1) 下载 KataGo OpenCL 版（GitHub Release，Eclipse 1.5.0+ 通常含 OpenCL 版）
-    // 使用 katago releases，Windows OpenCL 版本
+    // 1) 下载 KataGo OpenCL 版（适配 AMD Radeon 780M）
     let zip_path = dir.join("katago.zip");
-    let binary_url = "https://github.com/lightvector/KataGo/releases/download/v1.15.3/katago-v1.15.3-opencl-windows-x64.zip";
+    let binary_url = "https://github.com/lightvector/KataGo/releases/download/v1.16.5/katago-v1.16.5-opencl-windows-x64.zip";
     download(binary_url, &zip_path)?;
     unzip(&zip_path, &dir)?;
     let _ = std::fs::remove_file(&zip_path);
@@ -149,8 +149,9 @@ pub fn install() -> AppResult<String> {
         ));
     }
 
-    // 2) 下载网络权重（b18c384nbt 适合中端 GPU）
-    let model_url = "https://media.katagotraining.org/uploaded/networks/models/kata1/kata1_b18c384nbt-65d471d3.privacy.protected.bin.gz";
+    // 2) 下载网络权重（b18c384nbt-uec，b18c384 架构，兼容 v1.16.5）
+    //    用 GitHub Release 的版本（katagotraining.org 在部分地区被限制访问）
+    let model_url = "https://github.com/lightvector/KataGo/releases/download/v1.12.0/b18c384nbt-uec.bin.gz";
     download(model_url, &katago_model_path())?;
     if !katago_model_path().exists() {
         return Err(AppError::Engine("权重下载失败".into()));

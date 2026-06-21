@@ -19,45 +19,27 @@ export default function Board({
   showCoords = true,
   marks = [],
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // 自适应模式下的实际渲染尺寸（从固定档位中选取）
-  const [adaptiveSize, setAdaptiveSize] = useState(size ?? 600);
-
-  // 固定档位：保证 cell（格子像素）能被棋盘线数整除，避免对齐偏差
-  // 19路：cell = size/20（含边距），选 size 为 20 的倍数最理想
+  // 当前尺寸档位索引
   const SIZES = [360, 420, 480, 540, 600, 660, 720, 780, 840];
+  const [sizeIdx, setSizeIdx] = useState(4); // 默认 600px
 
-  // 监听容器宽度变化，从固定档位中选最接近（不超过）的尺寸
+  // 初始化：尝试根据窗口高度选合适档位
   useEffect(() => {
-    if (size !== undefined) {
-      setAdaptiveSize(size);
-      return;
+    if (size !== undefined) return;
+    const maxH = window.innerHeight - 100;
+    let idx = 0;
+    for (let i = 0; i < SIZES.length; i++) {
+      if (SIZES[i] <= maxH && SIZES[i] <= window.innerWidth - 360) idx = i;
     }
-    const container = containerRef.current;
-    if (!container) return;
-    const updateSize = () => {
-      const w = container.clientWidth;
-      const maxH = window.innerHeight - 100;
-      const target = Math.min(w, maxH);
-      // 从档位中选不超过 target 的最大值；若都比 target 大则选最小的
-      let best = SIZES[0];
-      for (const s of SIZES) {
-        if (s <= target) best = s;
-      }
-      setAdaptiveSize(best);
-    };
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(container);
-    window.addEventListener("resize", updateSize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateSize);
-    };
-  }, [size]);
+    setSizeIdx(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const renderSize = size ?? adaptiveSize;
+  const handleZoomIn = () => setSizeIdx((i) => Math.min(SIZES.length - 1, i + 1));
+  const handleZoomOut = () => setSizeIdx((i) => Math.max(0, i - 1));
+
+  const renderSize = size ?? SIZES[sizeIdx];
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -163,7 +145,7 @@ export default function Board({
   };
 
   return (
-    <div ref={containerRef} style={{ display: "inline-block", width: renderSize, height: renderSize }}>
+    <div style={{ display: "inline-block" }}>
       <canvas
         ref={canvasRef}
         width={renderSize}
@@ -177,6 +159,29 @@ export default function Board({
           height: renderSize,
         }}
       />
+      {size === undefined && (
+        <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 6, alignItems: "center" }}>
+          <button
+            onClick={handleZoomOut}
+            disabled={sizeIdx === 0}
+            style={{ fontSize: 16, padding: "2px 10px", cursor: sizeIdx === 0 ? "default" : "pointer" }}
+            title="缩小棋盘"
+          >
+            −
+          </button>
+          <span style={{ fontSize: 11, color: "#999", minWidth: 40, textAlign: "center" }}>
+            {renderSize}px
+          </span>
+          <button
+            onClick={handleZoomIn}
+            disabled={sizeIdx === SIZES.length - 1}
+            style={{ fontSize: 16, padding: "2px 10px", cursor: sizeIdx === SIZES.length - 1 ? "default" : "pointer" }}
+            title="放大棋盘"
+          >
+            +
+          </button>
+        </div>
+      )}
     </div>
   );
 }

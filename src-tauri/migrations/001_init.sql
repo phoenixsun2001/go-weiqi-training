@@ -69,3 +69,17 @@ CREATE TABLE IF NOT EXISTS imported_game (
     notes TEXT NOT NULL DEFAULT ''
 );
 
+-- 复盘结果持久化（避免重复跑 KataGo）
+CREATE TABLE IF NOT EXISTS review_result (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER NOT NULL UNIQUE,       -- 对应 imported_game.id
+    analyzed_at TEXT NOT NULL,
+    report_json TEXT NOT NULL,             -- 完整 AnalysisReport 的 JSON
+    winrate_curve_json TEXT NOT NULL,      -- 胜率曲线
+    moves_json TEXT NOT NULL,              -- 每手分析（失误分类等）
+    blunder_count INTEGER NOT NULL DEFAULT 0,
+    inaccuracy_count INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',      -- 复盘总结
+    FOREIGN KEY(game_id) REFERENCES imported_game(id) ON DELETE CASCADE
+);
+

@@ -71,6 +71,7 @@ pub fn run() {
             commands::get_imported_game,
             commands::delete_imported_game,
             commands::update_game_meta,
+            commands::get_review_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

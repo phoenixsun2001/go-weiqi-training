@@ -92,6 +92,18 @@ export interface AnalysisReport {
   winrate_curve: number[];
   blunder_count: number;
   inaccuracy_count: number;
+  summary: string;
+}
+
+// 持久化的复盘结果
+export interface ReviewResultDto {
+  game_id: number;
+  analyzed_at: string;
+  moves: MoveAnalysisDto[];
+  winrate_curve: number[];
+  blunder_count: number;
+  inaccuracy_count: number;
+  summary: string;
 }
 
 // 对局库（野狐导入）

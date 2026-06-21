@@ -517,9 +517,11 @@ pub struct ImportAndAnalyzeArgs {
     pub sgf: String,
     /// 失误判定阈值（胜率损失，0..1），默认 0.03
     pub threshold: Option<f64>,
+    /// 关联的对局库 ID（有则自动保存复盘结果并标记已复盘）
+    pub game_id: Option<i64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MoveAnalysisDto {
     pub move_index: usize,
     pub best_winrate: f64,
@@ -530,16 +532,18 @@ pub struct MoveAnalysisDto {
     pub category: String, // 阶段映射的分类标签
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct AnalysisReport {
     pub moves: Vec<MoveAnalysisDto>,
     pub winrate_curve: Vec<f64>, // 每手黑方胜率 0..1
     pub blunder_count: usize,
     pub inaccuracy_count: usize,
+    pub summary: String, // 复盘总结
 }
 
 /// 导入 SGF 棋谱并逐手分析：跑真实 KataGo、生成胜率曲线与失误标记，
 /// 同时按失误阶段自动写入弱点统计表（驱动针对性题库出题）。
+/// 若提供 game_id，分析结果自动持久化并标记对局为已复盘。
 #[tauri::command]
 pub fn import_and_analyze(
     state: State<AppState>,
@@ -552,7 +556,6 @@ pub fn import_and_analyze(
     let size = extract_size(&args.sgf);
     let threshold = args.threshold.unwrap_or(0.03);
 
-    // 推断棋盘大小
     let engine_guard = state.analysis_engine.lock().unwrap();
     let engine = engine_guard
         .as_ref()
@@ -563,16 +566,21 @@ pub fn import_and_analyze(
     // 把分析结果写入弱点表（按阶段映射分类），并构造 DTO
     let store = state.store.lock().unwrap();
     let db = ProblemDb::new(store.conn_ref());
+    let game_db = ImportedGameStore::new(store.conn_ref());
     let total = moves.len();
     let mut dtos = Vec::with_capacity(analyses.len());
     let mut winrate_curve = Vec::with_capacity(analyses.len());
     let mut blunder_count = 0usize;
     let mut inaccuracy_count = 0usize;
+    // 各阶段失误统计（用于总结）
+    let mut phase_blunders = std::collections::HashMap::<&str, usize>::new();
 
     for a in &analyses {
         let kind = a.kind;
         if kind == MoveKind::Blunder {
             blunder_count += 1;
+            let cat = phase_to_category(a.move_index, total, size);
+            *phase_blunders.entry(cat.label()).or_insert(0) += 1;
         } else if kind == MoveKind::Inaccuracy {
             inaccuracy_count += 1;
         }
@@ -593,13 +601,70 @@ pub fn import_and_analyze(
         });
     }
 
+    // 生成复盘总结
+    let worst = dtos.iter().max_by(|a, b| a.loss.partial_cmp(&b.loss).unwrap());
+    let summary = build_summary(total, blunder_count, inaccuracy_count, &phase_blunders, worst);
+
+    // 若关联对局库 ID，持久化复盘结果并标记已复盘
+    if let Some(gid) = args.game_id {
+        let report_json = serde_json::to_string(&dtos).unwrap_or_default();
+        let curve_json = serde_json::to_string(&winrate_curve).unwrap_or_default();
+        let full_json = format!("{{\"blunder_count\":{blunder_count},\"inaccuracy_count\":{inaccuracy_count}}}");
+        let _ = game_db.save_review_result(
+            gid,
+            &full_json,
+            &curve_json,
+            &report_json,
+            blunder_count as i64,
+            inaccuracy_count as i64,
+            &summary,
+        );
+        let _ = game_db.update_reviewed(gid, true);
+    }
+
     Ok(AnalysisReport {
         moves: dtos,
         winrate_curve,
         blunder_count,
         inaccuracy_count,
+        summary,
     })
 }
+
+/// 生成复盘总结文本
+fn build_summary(
+    total: usize,
+    blunders: usize,
+    inaccuracies: usize,
+    phase_blunders: &std::collections::HashMap<&str, usize>,
+    worst: Option<&MoveAnalysisDto>,
+) -> String {
+    let good_pct = if total > 0 {
+        ((total - blunders - inaccuracies) as f64 / total as f64 * 100.0).round() as i64
+    } else {
+        100
+    };
+    let mut s = format!(
+        "共 {total} 手：好棋率 {good_pct}%，严重失误 {blunders} 处，不准确 {inaccuracies} 处。"
+    );
+    if !phase_blunders.is_empty() {
+        let mut phases: Vec<_> = phase_blunders.iter().collect();
+        phases.sort_by(|a, b| b.1.cmp(a.1));
+        let detail: Vec<String> = phases.iter().map(|(k, v)| format!("{}{}", k, v)).collect();
+        s.push_str(&format!(" 失误集中在{}。", detail.join("、")));
+    }
+    if let Some(w) = worst {
+        if w.loss > 0.001 {
+            s.push_str(&format!(
+                " 最严重失误在第 {} 手（胜率损失 {:.0}%）。",
+                w.move_index + 1,
+                w.loss * 100.0
+            ));
+        }
+    }
+    s
+}
+
 
 fn move_kind_str(k: MoveKind) -> &'static str {
     match k {
@@ -819,6 +884,39 @@ pub fn update_game_meta(
     }
     let row = db.get(args.id)?.ok_or_else(|| AppError::Rule("对局不存在".into()))?;
     Ok(row_to_dto(row))
+}
+
+#[derive(Serialize)]
+pub struct ReviewResultDto {
+    pub game_id: i64,
+    pub analyzed_at: String,
+    pub moves: Vec<MoveAnalysisDto>,
+    pub winrate_curve: Vec<f64>,
+    pub blunder_count: i64,
+    pub inaccuracy_count: i64,
+    pub summary: String,
+}
+
+/// 获取已持久化的复盘结果（不用重跑 KataGo）
+#[tauri::command]
+pub fn get_review_result(state: State<AppState>, game_id: i64) -> Result<Option<ReviewResultDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    let row = match db.get_review_result(game_id)? {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    let moves: Vec<MoveAnalysisDto> = serde_json::from_str(&row.moves_json).unwrap_or_default();
+    let winrate_curve: Vec<f64> = serde_json::from_str(&row.winrate_curve_json).unwrap_or_default();
+    Ok(Some(ReviewResultDto {
+        game_id: row.game_id,
+        analyzed_at: row.analyzed_at,
+        moves,
+        winrate_curve,
+        blunder_count: row.blunder_count,
+        inaccuracy_count: row.inaccuracy_count,
+        summary: row.summary,
+    }))
 }
 
 #[cfg(test)]

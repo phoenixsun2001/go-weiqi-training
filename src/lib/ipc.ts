@@ -9,6 +9,7 @@ import type {
   ImportedGameDto,
   PlayResult,
   ProblemDto,
+  ReviewResultDto,
   StartEngineArgs,
   SubmitResult,
   WeaknessDto,
@@ -62,9 +63,9 @@ export const ipc = {
     }),
   stopAnalysisEngine: () => invoke<void>("stop_analysis_engine"),
   analysisEngineStatus: () => invoke<{ running: boolean }>("analysis_engine_status"),
-  importAndAnalyze: (sgf: string, threshold?: number) =>
+  importAndAnalyze: (sgf: string, threshold?: number, gameId?: number) =>
     invoke<AnalysisReport>("import_and_analyze", {
-      args: { sgf, threshold: threshold ?? null },
+      args: { sgf, threshold: threshold ?? null, game_id: gameId ?? null },
     }),
 
   // KataGo 一键安装与自动启动
@@ -83,6 +84,8 @@ export const ipc = {
     invoke<ImportedGameDto>("update_game_meta", {
       args: { id, reviewed: reviewed ?? null, tags: tags ?? null, notes: notes ?? null },
     }),
+  getReviewResult: (gameId: number) =>
+    invoke<ReviewResultDto | null>("get_review_result", { gameId }),
 };
 
 type Color = import("../types").Color;

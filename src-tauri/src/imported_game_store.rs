@@ -100,7 +100,56 @@ impl<'a> ImportedGameStore<'a> {
         )?;
         Ok(())
     }
+
+    // ===== 复盘结果持久化 =====
+
+    /// 保存或更新复盘结果（按 game_id 唯一）
+    pub fn save_review_result(
+        &self,
+        game_id: i64,
+        report_json: &str,
+        winrate_curve_json: &str,
+        moves_json: &str,
+        blunder_count: i64,
+        inaccuracy_count: i64,
+        summary: &str,
+    ) -> AppResult<i64> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_iso();
+        conn.execute(
+            "INSERT INTO review_result(game_id,analyzed_at,report_json,winrate_curve_json,moves_json,blunder_count,inaccuracy_count,summary)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(game_id) DO UPDATE SET
+                analyzed_at=?2, report_json=?3, winrate_curve_json=?4, moves_json=?5,
+                blunder_count=?6, inaccuracy_count=?7, summary=?8",
+            params![game_id, now, report_json, winrate_curve_json, moves_json, blunder_count, inaccuracy_count, summary],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn get_review_result(&self, game_id: i64) -> AppResult<Option<ReviewResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut sel = conn.prepare(
+            "SELECT id,game_id,analyzed_at,report_json,winrate_curve_json,moves_json,blunder_count,inaccuracy_count,summary
+             FROM review_result WHERE game_id=?1",
+        )?;
+        let mut iter = sel.query_and_then(params![game_id], map_review_row)?;
+        Ok(iter.next().transpose()?)
+    }
 }
+
+pub struct ReviewResultRow {
+    pub id: i64,
+    pub game_id: i64,
+    pub analyzed_at: String,
+    pub report_json: String,
+    pub winrate_curve_json: String,
+    pub moves_json: String,
+    pub blunder_count: i64,
+    pub inaccuracy_count: i64,
+    pub summary: String,
+}
+
 
 fn map_row(r: &rusqlite::Row) -> rusqlite::Result<ImportedGameRow> {
     Ok(ImportedGameRow {
@@ -119,6 +168,20 @@ fn map_row(r: &rusqlite::Row) -> rusqlite::Result<ImportedGameRow> {
         reviewed: r.get::<_, i32>(12)? != 0,
         tags: r.get(13)?,
         notes: r.get(14)?,
+    })
+}
+
+fn map_review_row(r: &rusqlite::Row) -> rusqlite::Result<ReviewResultRow> {
+    Ok(ReviewResultRow {
+        id: r.get(0)?,
+        game_id: r.get(1)?,
+        analyzed_at: r.get(2)?,
+        report_json: r.get(3)?,
+        winrate_curve_json: r.get(4)?,
+        moves_json: r.get(5)?,
+        blunder_count: r.get(6)?,
+        inaccuracy_count: r.get(7)?,
+        summary: r.get(8)?,
     })
 }
 

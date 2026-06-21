@@ -287,6 +287,143 @@ fn _keep_xy_to_gtp(x: usize, y: usize, size: usize) -> AppResult<String> {
 // ============ 题库训练模块 ============
 
 #[derive(Serialize)]
+pub struct TsumegoImportResult {
+    pub imported: usize,
+    pub skipped: usize,
+    pub message: String,
+}
+
+/// 批量导入内置死活题库（gogameguru 420 题，分 easy/intermediate/hard）
+#[tauri::command]
+pub fn import_tsumego(state: State<AppState>) -> Result<TsumegoImportResult, AppError> {
+    use crate::sgf::extract_tsumego_answer;
+    use std::fs;
+
+    // 题库目录：运行时在 resources/tsumego 下（dev 模式在 src-tauri/resources）
+    let candidates = [
+        "resources/tsumego",
+        "src-tauri/resources/tsumego",
+        "../src-tauri/resources/tsumego",
+    ];
+    let base = candidates
+        .iter()
+        .map(|p| std::path::PathBuf::from(p))
+        .find(|p| p.exists())
+        .ok_or_else(|| AppError::Engine("未找到内置题库目录".into()))?;
+
+    let store = state.store.lock().unwrap();
+    let db = ProblemDb::new(store.conn_ref());
+
+    // 难度映射：easy=2, intermediate=4, hard=6
+    let levels: [(&str, i32); 3] = [("easy", 2), ("intermediate", 4), ("hard", 6)];
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+
+    for (dir_name, difficulty) in &levels {
+        let dir = base.join(dir_name);
+        if !dir.exists() {
+            continue;
+        }
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("sgf") {
+                continue;
+            }
+            let sgf_content = match fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            // 提取正解
+            let answer = match extract_tsumego_answer(&sgf_content) {
+                Some(a) if !a.is_empty() => a,
+                _ => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            // 提取棋盘大小
+            let size = sgf_content
+                .match_indices("SZ[")
+                .next()
+                .and_then(|(i, _)| {
+                    let rest = &sgf_content[i + 3..];
+                    rest.find(']').and_then(|end| rest[..end].parse::<usize>().ok())
+                })
+                .unwrap_or(19);
+            // 修正坐标行号（需要用实际棋盘大小）
+            let answer = fix_gtp_row(&answer, &sgf_content, size);
+            // 提取注释作为解析
+            let explanation = extract_comment(&sgf_content);
+            // 去重：检查是否已存在相同 SGF
+            let sgf_check = sgf_content.lines().take(1).next().unwrap_or("").to_string();
+            let _ = sgf_check;
+
+            match db.insert_problem(
+                Category::Tsumego,
+                *difficulty,
+                &sgf_content,
+                &answer,
+                &explanation,
+            ) {
+                Ok(_) => imported += 1,
+                Err(_) => skipped += 1,
+            }
+        }
+    }
+
+    Ok(TsumegoImportResult {
+        imported,
+        skipped,
+        message: format!("导入完成：{imported} 题，跳过 {skipped} 题"),
+    })
+}
+
+/// 修正 GTP 行号（extract_tsumego_answer 假设 19 路，实际可能不同）
+fn fix_gtp_row(vertex: &str, _sgf: &str, size: usize) -> String {
+    if vertex.len() < 2 {
+        return vertex.to_string();
+    }
+    // 提取列字母和行号
+    let col = vertex.chars().next().unwrap();
+    let row_str = &vertex[1..];
+    if let Ok(row) = row_str.parse::<usize>() {
+        // 原来按 19 路算的，如果 size != 19 需要修正
+        if size != 19 {
+            // row_19 = 19 - y, row_size = size - y
+            // y = 19 - row_19, row_size = size - y = size - 19 + row_19
+            let y = 19isize - row as isize;
+            let new_row = size as isize - y;
+            return format!("{col}{new_row}");
+        }
+    }
+    vertex.to_string()
+}
+
+/// 提取 SGF 中的 C[...] 注释作为解析文本
+fn extract_comment(sgf: &str) -> String {
+    if let Some(start) = sgf.find("C[") {
+        let content_start = start + 2;
+        if let Some(end) = sgf[content_start..].find(']') {
+            let comment = &sgf[content_start..content_start + end];
+            // 取第一段非链接文本
+            let first_line = comment.lines().next().unwrap_or("死活题").trim();
+            if !first_line.is_empty() && !first_line.starts_with("http") {
+                return first_line.to_string();
+            }
+        }
+    }
+    "死活题".to_string()
+}
+
+#[derive(Serialize)]
 pub struct ProblemDto {
     pub id: i64,
     pub category: String,

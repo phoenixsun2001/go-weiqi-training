@@ -45,6 +45,8 @@ export const ipc = {
   // 题库训练
   nextProblem: (maxDifficulty?: number) =>
     invoke<ProblemDto | null>("next_problem", { args: { max_difficulty: maxDifficulty ?? null } }),
+  importTsumego: () =>
+    invoke<{ imported: number; skipped: number; message: string }>("import_tsumego"),
   submitAnswer: (problemId: number, userAnswer: string) =>
     invoke<SubmitResult>("submit_answer", { args: { problem_id: problemId, user_answer: userAnswer } }),
   wrongBook: () => invoke<WrongBookDto[]>("wrong_book"),

@@ -22,6 +22,23 @@ export default function ProblemView() {
   const [solved, setSolved] = useState(0);
   const [attempted, setAttempted] = useState(0);
   const [difficulty, setDifficulty] = useState<number>(0); // 0 = 自动(跟随棋力)
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
+  const handleImport = async () => {
+    setImporting(true);
+    setImportMsg("正在导入内置死活题库（gogameguru 420 题）…");
+    try {
+      const res = await ipc.importTsumego();
+      setImportMsg(res.message);
+      await loadProblem();
+      await loadReports();
+    } catch (e) {
+      setImportMsg(`导入失败：${e}`);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const loadProblem = useCallback(async () => {
     setError(null);
@@ -125,22 +142,28 @@ export default function ProblemView() {
       </div>
 
       <div style={{ minWidth: 280, maxWidth: 360 }}>
-        {/* 难度选择 */}
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 13 }}>难度筛选：</label>
+        {/* 难度选择 + 导入题库 */}
+        <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ fontSize: 13 }}>难度：</label>
           <select
             value={difficulty}
             onChange={(e) => setDifficulty(Number(e.target.value))}
-            style={{ marginLeft: 8, padding: 4 }}
+            style={{ padding: 4 }}
           >
-            <option value={0}>自动（跟随棋力）</option>
+            <option value={0}>自动</option>
             {[1, 2, 3, 4, 5].map((d) => (
-              <option key={d} value={d}>
-                ≤ 业余 {d} 段
-              </option>
+              <option key={d} value={d}>≤ {d}段</option>
             ))}
           </select>
+          <button onClick={handleImport} disabled={importing} style={{ fontSize: 12, padding: "4px 8px" }}>
+            {importing ? "导入中…" : "📚 导入题库"}
+          </button>
         </div>
+        {importMsg && (
+          <p style={{ fontSize: 12, color: importing ? "#1890ff" : "#666", margin: "0 0 8px" }}>
+            {importMsg}
+          </p>
+        )}
 
         {problem && (
           <>

@@ -6,3 +6,4 @@ training.db
 .dev-port
 katago/
 src-tauri/katago/
+resources/tsumego/

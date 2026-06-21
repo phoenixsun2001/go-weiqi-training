@@ -124,6 +124,92 @@ pub fn export_sgf(size: usize, moves: &[(Color, usize, usize)]) -> AppResult<Str
     Ok(out)
 }
 
+/// 从死活题 SGF 的变化树中提取正解第一手。
+/// 在包含 "Correct" 的分支路径上，找到第一个 B[..] 或 W[..] 的着手。
+/// 返回 GPT 顶点（大写，如 "Q16"），可能有多个正解则取第一个。
+pub fn extract_tsumego_answer(sgf: &str) -> Option<String> {
+    // 查找 "Correct" 标记所在的分支
+    // 死活题结构：(;...setup...(;B[xx];W[yy](;B[zz]C[Correct])(;B[aa]))...)
+    // 正解是到达 Correct 之前的第一手黑棋（通常是主分支的第一个 B[..]）
+
+    // 策略1: 找 C[Correct] 之前的最后一个 B[xx]
+    // 找到 Correct 之前最近的 B[...] 作为正解
+    if let Some(correct_pos) = sgf.find("Correct") {
+        let before = &sgf[..correct_pos];
+        // 从 Correct 位置往前找最近的 B[xx]
+        // 在 SGF 变化树中，到达 Correct 的路径就是正解手
+        // 找到 Correct 所在的子树，往前回溯到第一个 B[xx]
+        return find_last_move_before(before);
+    }
+    // 如果没有 Correct 标记，取第一个 B[xx] 作为答案
+    find_first_black_move(sgf)
+}
+
+fn find_last_move_before(text: &str) -> Option<String> {
+    // 找所有 B[xx] 的最后一个
+    let mut last: Option<String> = None;
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b';' && (bytes[i + 1] == b'B' || bytes[i + 1] == b'W') && bytes[i + 2] == b'[' {
+            // 提取 [xx] 内容
+            let start = i + 3;
+            if let Some(end) = text[start..].find(']') {
+                let coord = &text[start..start + end];
+                if coord.len() == 2 {
+                    // SGF 小写坐标转 GTP 顶点
+                    last = Some(sgf_coord_to_gtp(coord));
+                }
+            }
+        }
+        i += 1;
+    }
+    last
+}
+
+fn find_first_black_move(sgf: &str) -> Option<String> {
+    let bytes = sgf.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b';' && bytes[i + 1] == b'B' && bytes[i + 2] == b'[' {
+            let start = i + 3;
+            if let Some(end) = sgf[start..].find(']') {
+                let coord = &sgf[start..start + end];
+                if coord.len() == 2 {
+                    return Some(sgf_coord_to_gtp(coord));
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// SGF 小写坐标 "pq" 转 GTP 大写顶点 "P4"
+fn sgf_coord_to_gpt(coord: &str) -> String {
+    let cb = coord.as_bytes();
+    if cb.len() < 2 {
+        return String::new();
+    }
+    let x = cb[0] - b'a'; // 0-based
+    let y = cb[1] - b'a';
+    // GTP 列：跳过 I
+    let col = if x < 8 {
+        (b'A' + x) as char
+    } else {
+        (b'A' + x + 1) as char
+    };
+    // GTP 行：从下到上，需要知道棋盘大小
+    // 简化：用 19 路标准，y=0 是顶部 → GTP 行 = 19 - y
+    let row = 19 - y;
+    format!("{col}{row}")
+}
+
+// 保留原名兼容
+fn sgf_coord_to_gtp(coord: &str) -> String {
+    sgf_coord_to_gpt(coord)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -52,6 +52,7 @@ pub fn run() {
             commands::set_difficulty,
             commands::ai_move,
             commands::next_problem,
+            commands::import_tsumego,
             commands::submit_answer,
             commands::wrong_book,
             commands::weakness_report,

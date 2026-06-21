@@ -73,14 +73,13 @@ export default function GuessView() {
 
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
-      <div style={{ flexShrink: 0 }}>
+      <div style={{ flex: 1, minWidth: 300 }}>
         <h2>猜棋训练</h2>
         {snapshot ? (
           <Board
             snapshot={snapshot}
             onPlay={handleBoardClick}
             interactive={!result}
-            size={480}
             showCoords
             marks={marks}
           />

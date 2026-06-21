@@ -1,24 +1,56 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BoardSnapshot, Color } from "../types";
 
 interface Props {
   snapshot: BoardSnapshot;
   onPlay?: (x: number, y: number) => void;
   interactive: boolean;
-  size?: number; // 像素大小
-  showCoords?: boolean; // 是否显示坐标
-  marks?: { x: number; y: number; label: string; color?: string }[]; // 标记点
+  /** 最大像素尺寸；不传则自适应容器宽度 */
+  size?: number;
+  showCoords?: boolean;
+  marks?: { x: number; y: number; label: string; color?: string }[];
 }
 
 export default function Board({
   snapshot,
   onPlay,
   interactive,
-  size = 540,
+  size,
   showCoords = true,
   marks = [],
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 自适应模式下的实际渲染尺寸
+  const [adaptiveSize, setAdaptiveSize] = useState(size ?? 540);
+
+  // 监听容器宽度变化（仅在未指定固定 size 时启用自适应）
+  useEffect(() => {
+    if (size !== undefined) {
+      setAdaptiveSize(size);
+      return;
+    }
+    const container = containerRef.current;
+    if (!container) return;
+    const updateSize = () => {
+      const w = container.clientWidth;
+      // 取容器宽度和可视高度的较小值，保证棋盘不超出
+      const maxH = window.innerHeight - 120;
+      const s = Math.max(200, Math.min(w, maxH));
+      setAdaptiveSize(s);
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    window.addEventListener("resize", updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [size]);
+
+  // 实际渲染尺寸
+  const renderSize = size ?? adaptiveSize;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -26,14 +58,13 @@ export default function Board({
     const ctx = canvas.getContext("2d")!;
     const n = snapshot.size;
 
-    // 有坐标时多留一圈边距
-    const margin = showCoords ? size * 0.05 : size / (n + 1);
-    const boardArea = size - 2 * margin;
+    const margin = showCoords ? renderSize * 0.05 : renderSize / (n + 1);
+    const boardArea = renderSize - 2 * margin;
     const cell = boardArea / n;
 
     // 背景
     ctx.fillStyle = "#ddb86b";
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0, 0, renderSize, renderSize);
 
     // 网格线
     ctx.strokeStyle = "#000";
@@ -68,12 +99,10 @@ export default function Board({
       const cols = gtpColumns(n);
       for (let i = 0; i < n; i++) {
         const p = margin + cell * (i + 0.5);
-        // 顶部和底部字母
         ctx.fillText(cols[i], p, margin * 0.4);
-        ctx.fillText(cols[i], p, size - margin * 0.4);
-        // 左侧和右侧数字
+        ctx.fillText(cols[i], p, renderSize - margin * 0.4);
         ctx.fillText(String(n - i), margin * 0.4, p);
-        ctx.fillText(String(n - i), size - margin * 0.4, p);
+        ctx.fillText(String(n - i), renderSize - margin * 0.4, p);
       }
     }
 
@@ -95,7 +124,7 @@ export default function Board({
       }
     }
 
-    // 标记（如答案标记 X / O）
+    // 标记
     for (const m of marks) {
       if (m.x < 0 || m.x >= n || m.y < 0 || m.y >= n) continue;
       const cx = margin + cell * (m.x + 0.5);
@@ -106,18 +135,18 @@ export default function Board({
       ctx.fillStyle = m.color ?? "#e22";
       ctx.fillText(m.label, cx, cy);
     }
-  }, [snapshot, size, showCoords, marks]);
+  }, [snapshot, renderSize, showCoords, marks]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive || !onPlay) return;
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const scale = size / rect.width;
+    const scale = renderSize / rect.width;
     const px = (e.clientX - rect.left) * scale;
     const py = (e.clientY - rect.top) * scale;
     const n = snapshot.size;
-    const margin = showCoords ? size * 0.05 : size / (n + 1);
-    const boardArea = size - 2 * margin;
+    const margin = showCoords ? renderSize * 0.05 : renderSize / (n + 1);
+    const boardArea = renderSize - 2 * margin;
     const cell = boardArea / n;
     const x = Math.floor((px - margin) / cell);
     const y = Math.floor((py - margin) / cell);
@@ -127,28 +156,30 @@ export default function Board({
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={size}
-      height={size}
-      onClick={handleClick}
-      style={{
-        cursor: interactive ? "pointer" : "default",
-        background: "#ddb86b",
-        display: "block",
-        flexShrink: 0,
-        width: size,
-        height: size,
-      }}
-    />
+    <div ref={containerRef} style={{ display: "inline-block" }}>
+      <canvas
+        ref={canvasRef}
+        width={renderSize}
+        height={renderSize}
+        onClick={handleClick}
+        style={{
+          cursor: interactive ? "pointer" : "default",
+          background: "#ddb86b",
+          display: "block",
+          width: "100%",
+          maxWidth: renderSize,
+          height: "auto",
+          aspectRatio: "1 / 1",
+        }}
+      />
+    </div>
   );
 }
 
-/** GTP 列字母（跳过 I） */
 function gtpColumns(n: number): string[] {
   const cols: string[] = [];
   for (let i = 0; i < n; i++) {
-    const code = i < 8 ? 65 + i : 66 + i; // A-H, J-...
+    const code = i < 8 ? 65 + i : 66 + i;
     cols.push(String.fromCharCode(code));
   }
   return cols;
@@ -156,26 +187,10 @@ function gtpColumns(n: number): string[] {
 
 function starPoints(n: number): [number, number][] {
   if (n === 9) {
-    return [
-      [2, 2],
-      [2, 6],
-      [6, 2],
-      [6, 6],
-      [4, 4],
-    ];
+    return [[2, 2], [2, 6], [6, 2], [6, 6], [4, 4]];
   }
   if (n === 19) {
-    return [
-      [3, 3],
-      [3, 9],
-      [3, 15],
-      [9, 3],
-      [9, 9],
-      [9, 15],
-      [15, 3],
-      [15, 9],
-      [15, 15],
-    ];
+    return [[3, 3], [3, 9], [3, 15], [9, 3], [9, 9], [9, 15], [15, 3], [15, 9], [15, 15]];
   }
   return [];
 }
@@ -184,7 +199,6 @@ export function turnLabel(turn: Color): string {
   return turn === "black" ? "黑方" : "白方";
 }
 
-/** 内部 (x,y,size) 转 GTP 顶点字符串（跳过 I），与后端一致 */
 export function xyToGtp(x: number, y: number, size: number): string {
   const col = x < 8 ? String.fromCharCode(65 + x) : String.fromCharCode(66 + x);
   const row = size - y;

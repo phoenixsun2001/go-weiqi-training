@@ -125,14 +125,13 @@ export default function ProblemView() {
 
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
-      <div style={{ flexShrink: 0 }}>
+      <div style={{ flex: 1, minWidth: 300 }}>
         <h2>针对性题库训练</h2>
         {snapshot ? (
           <Board
             snapshot={snapshot}
             onPlay={handleBoardClick}
             interactive={!answerState?.submitted}
-            size={480}
             showCoords
             marks={marks}
           />

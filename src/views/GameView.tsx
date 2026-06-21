@@ -70,8 +70,8 @@ export default function GameView() {
 
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
-      <div style={{ flexShrink: 0 }}>
-        <Board snapshot={snapshot} onPlay={(x, y) => play(x, y)} interactive={!loading && !aiThinking} size={540} showCoords />
+      <div style={{ flex: 1, minWidth: 300 }}>
+        <Board snapshot={snapshot} onPlay={(x, y) => play(x, y)} interactive={!loading && !aiThinking} showCoords />
       </div>
       <div style={{ minWidth: 280, width: 320, flexShrink: 1, overflowY: "auto", maxHeight: "calc(100vh - 100px)" }}>
         <h2>对战练习</h2>

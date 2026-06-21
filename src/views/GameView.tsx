@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Board, { turnLabel } from "../components/Board";
 import { useGameStore } from "../store/gameStore";
 import { ipc } from "../lib/ipc";
-import type { Color } from "../types";
+import type { Color, TerritoryEstimate } from "../types";
 
 export default function GameView() {
   const {
@@ -31,6 +31,9 @@ export default function GameView() {
   const [katagoInstalled, setKatagoInstalled] = useState<boolean | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installMsg, setInstallMsg] = useState<string | null>(null);
+  const [territory, setTerritory] = useState<TerritoryEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   useEffect(() => {
     refresh();
@@ -65,6 +68,29 @@ export default function GameView() {
       setInstallMsg(`✓ AI 引擎已启动（业余${s.difficulty}段）`);
     } catch (e) {
       setInstallMsg(`启动失败：${e}`);
+    }
+  };
+
+  const handleEstimate = async () => {
+    setEstimating(true);
+    setTerritory(null);
+    try {
+      const t = await ipc.estimateTerritory();
+      setTerritory(t);
+    } catch (e) {
+      setInstallMsg(`形势判断失败：${e}`);
+    } finally {
+      setEstimating(false);
+    }
+  };
+
+  const handleSaveGame = async () => {
+    try {
+      const result = territory?.score ?? "";
+      const id = await ipc.saveCurrentGame("我", `AI(${difficulty}段)`, result);
+      setSaveMsg(`✓ 棋谱已保存到对局库（#${id}）`);
+    } catch (e) {
+      setSaveMsg(`保存失败：${e}`);
     }
   };
 
@@ -185,10 +211,64 @@ export default function GameView() {
 
         <hr style={{ margin: "16px 0", border: "none", borderTop: "1px solid #eee" }} />
 
+        {/* 形势判断 */}
+        <h3 style={{ fontSize: 15, margin: "0 0 8px" }}>形势判断</h3>
+        <button
+          onClick={handleEstimate}
+          disabled={!engineRunning || estimating}
+          style={{ marginBottom: 8 }}
+        >
+          {estimating ? "判断中…" : "📊 形势判断"}
+        </button>
+        {territory && (
+          <div style={{ padding: 10, background: "#f6f8fa", borderRadius: 6, marginBottom: 8, fontSize: 13 }}>
+            <div style={{ marginBottom: 4 }}>
+              <strong>结果：</strong>
+              <span style={{ color: territory.lead > 0 ? "#000" : "#666", fontSize: 15 }}>
+                {territory.score}
+              </span>
+            </div>
+            <div style={{ marginBottom: 4 }}>
+              <strong>黑方胜率：</strong>
+              {(territory.black_winrate * 100).toFixed(1)}%
+              <div style={{ height: 12, background: "#ddd", borderRadius: 6, marginTop: 4, overflow: "hidden" }}>
+                <div
+                  style={{
+                    width: `${territory.black_winrate * 100}%`,
+                    height: "100%",
+                    background: "#111",
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <strong>领先：</strong>
+              <span style={{ color: territory.lead > 0 ? "#000" : "#888" }}>
+                {territory.lead > 0
+                  ? `黑方领先 ${territory.lead.toFixed(1)} 目`
+                  : territory.lead < 0
+                  ? `白方领先 ${(-territory.lead).toFixed(1)} 目`
+                  : "形势均势"}
+              </span>
+              <span style={{ marginLeft: 8, color: "#999" }}>· {territory.move_count} 手</span>
+            </div>
+          </div>
+        )}
+
+        <hr style={{ margin: "12px 0", border: "none", borderTop: "1px solid #eee" }} />
+
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <button onClick={() => pass()} disabled={loading || aiThinking}>
             虚手 (Pass)
           </button>
+          <button onClick={handleSaveGame} disabled={loading}>
+            💾 保存棋谱到对局库
+          </button>
+          {saveMsg && (
+            <p style={{ fontSize: 12, color: saveMsg.startsWith("✓") ? "#2a7d2a" : "#cf1322" }}>
+              {saveMsg}
+            </p>
+          )}
           <button onClick={() => newGame(9)}>新对局（9路）</button>
           <button onClick={() => newGame(19)}>新对局（19路）</button>
           <button onClick={() => refresh()}>刷新棋盘</button>

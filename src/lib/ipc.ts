@@ -3,6 +3,7 @@ import type {
   AiMoveResult,
   AnalysisReport,
   BoardSnapshot,
+  TerritoryEstimate,
   EngineStatus,
   GuessDto,
   GuessResult,
@@ -89,6 +90,20 @@ export const ipc = {
     }),
   getReviewResult: (gameId: number) =>
     invoke<ReviewResultDto | null>("get_review_result", { gameId }),
+
+  // 形势判断 + 导出棋谱
+  estimateTerritory: () => invoke<TerritoryEstimate>("estimate_territory"),
+  exportCurrentGame: () => invoke<string>("export_current_game"),
+  saveCurrentGame: (blackName?: string, whiteName?: string, result?: string) =>
+    invoke<number>("save_current_game", {
+      args: {
+        black_name: blackName ?? null,
+        white_name: whiteName ?? null,
+        black_rank: null,
+        white_rank: null,
+        result: result ?? null,
+      },
+    }),
 };
 
 type Color = import("../types").Color;

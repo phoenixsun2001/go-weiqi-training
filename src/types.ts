@@ -106,6 +106,14 @@ export interface ReviewResultDto {
   summary: string;
 }
 
+// 形势判断
+export interface TerritoryEstimate {
+  score: string;
+  black_winrate: number;
+  lead: number;
+  move_count: number;
+}
+
 // 对局库（野狐导入）
 export interface ImportedGameDto {
   id: number;

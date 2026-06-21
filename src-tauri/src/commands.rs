@@ -278,10 +278,161 @@ fn color_str(c: Color) -> String {
     }
 }
 
-// 保留引用以避免 unused import 警告（xy_to_gtp 在未来引擎同步时会用到）
+// 保留引用以避免 unused import 譃告（xy_to_gtp 在未来引擎同步时会用到）
 #[allow(dead_code)]
 fn _keep_xy_to_gtp(x: usize, y: usize, size: usize) -> AppResult<String> {
     xy_to_gtp(x, y, size)
+}
+
+// ============ 形势判断 + 导出棋谱 ============
+
+#[derive(Serialize)]
+pub struct TerritoryEstimate {
+    /// KataGo final_score 结果，如 "B+3.5" / "W+2.5" / "0"
+    pub score: String,
+    /// 黑方胜率 0..1（从 kata-analyze 提取）
+    pub black_winrate: f64,
+    /// 黑方领先（正数=黑领先，负数=白领先），以目为单位
+    pub lead: f64,
+    /// 当前手数
+    pub move_count: usize,
+}
+
+/// 形势判断：向 KataGo 请求 final_score 和当前胜率
+#[tauri::command]
+pub fn estimate_territory(state: State<AppState>) -> Result<TerritoryEstimate, AppError> {
+    let engine_guard = state.engine.lock().unwrap();
+    let engine = engine_guard
+        .as_ref()
+        .ok_or_else(|| AppError::Engine("对手引擎未启动".into()))?;
+
+    // 获取 final_score（需要 Chinese 数子规则）
+    let score = engine.command("kata-set-rules chinese").ok();
+    let _ = score;
+    let score = engine
+        .command("final_score")
+        .unwrap_or_else(|_| "0".to_string());
+
+    // 获取当前胜率（用 lz-analyze 一次）
+    let winrate = engine.command("lz-analyze black 1").ok();
+    let black_winrate = winrate
+        .as_ref()
+        .and_then(|w| crate::review_pipeline::extract_winrate(w).ok())
+        .unwrap_or(0.5);
+
+    let game = state.game.lock().unwrap();
+    let move_count = game.moves.len();
+
+    // 解析领先目数
+    let lead = parse_lead(&score);
+
+    Ok(TerritoryEstimate {
+        score,
+        black_winrate,
+        lead,
+        move_count,
+    })
+}
+
+/// 解析 final_score 结果为领先目数（正=黑领先）
+fn parse_lead(score: &str) -> f64 {
+    let s = score.trim();
+    if s == "0" {
+        return 0.0;
+    }
+    if let Some(rest) = s.strip_prefix("B+") {
+        return rest.trim().parse::<f64>().unwrap_or(0.0);
+    }
+    if let Some(rest) = s.strip_prefix("W+") {
+        return -(rest.trim().parse::<f64>().unwrap_or(0.0));
+    }
+    0.0
+}
+
+/// 导出当前对局为 SGF 字符串
+#[tauri::command]
+pub fn export_current_game(state: State<AppState>) -> Result<String, AppError> {
+    let game = state.game.lock().unwrap();
+    let size = game.size();
+    let mut moves: Vec<(crate::game_state::Color, usize, usize)> = vec![];
+    for m in &game.moves {
+        match m {
+            crate::game_state::MoveRecord::Play { color, x, y, .. } => {
+                moves.push((*color, *x, *y));
+            }
+            crate::game_state::MoveRecord::Pass { color } => {
+                moves.push((*color, usize::MAX, usize::MAX));
+            }
+        }
+    }
+    let sgf = crate::sgf::export_sgf(size, &moves)?;
+    Ok(sgf)
+}
+
+/// 将当前对局保存到对局库（供对战后归档）
+#[derive(Deserialize)]
+pub struct SaveCurrentGameArgs {
+    pub black_name: Option<String>,
+    pub white_name: Option<String>,
+    pub black_rank: Option<String>,
+    pub white_rank: Option<String>,
+    pub result: Option<String>,
+}
+
+#[tauri::command]
+pub fn save_current_game(
+    state: State<AppState>,
+    args: SaveCurrentGameArgs,
+) -> Result<i64, AppError> {
+    let sgf = {
+        let game = state.game.lock().unwrap();
+        let size = game.size();
+        let mut moves: Vec<(crate::game_state::Color, usize, usize)> = vec![];
+        for m in &game.moves {
+            match m {
+                crate::game_state::MoveRecord::Play { color, x, y, .. } => {
+                    moves.push((*color, *x, *y));
+                }
+                crate::game_state::MoveRecord::Pass { color } => {
+                    moves.push((*color, usize::MAX, usize::MAX));
+                }
+            }
+        }
+        crate::sgf::export_sgf(size, &moves)?
+    };
+
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    // 构造带元数据的 SGF
+    let black = args.black_name.unwrap_or_else(|| "我".into());
+    let white = args.white_name.unwrap_or_else(|| "AI".into());
+    let result = args.result.unwrap_or_default();
+    let full_sgf = format!(
+        "(;GM[1]FF[4]SZ[{sz}]PB[{black}]PW[{white}]RE[{result}]{body})",
+        sz = sgf.match_indices("SZ[").next().map(|_| "").unwrap_or("19"),
+        body = sgf
+            .trim_start_matches(|c: char| c != ';')
+    );
+    // 重新生成带元数据的 SGF
+    let size_match = sgf.match_indices("SZ[").next();
+    let size = size_match
+        .and_then(|(i, _)| {
+            let rest = &sgf[i + 3..];
+            rest.find(']').and_then(|end| rest[..end].parse::<usize>().ok())
+        })
+        .unwrap_or(19);
+    let meta = crate::sgf::SgfMetadata {
+        black_name: black,
+        white_name: white,
+        black_rank: args.black_rank.unwrap_or_default(),
+        white_rank: args.white_rank.unwrap_or_default(),
+        result: result,
+        board_size: size,
+        played_date: String::new(),
+        move_count: sgf.matches(";B[").count() + sgf.matches(";W[").count(),
+    };
+    let id = db.insert("play", &meta, &sgf)?;
+    Ok(id)
 }
 
 // ============ 题库训练模块 ============

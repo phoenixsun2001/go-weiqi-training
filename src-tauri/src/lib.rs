@@ -3,6 +3,7 @@ pub mod coords;
 pub mod engine_manager;
 pub mod error;
 pub mod game_state;
+pub mod katago_setup;
 pub mod local_store;
 pub mod opponent_ai;
 pub mod problem_db;
@@ -60,6 +61,10 @@ pub fn run() {
             commands::stop_analysis_engine,
             commands::analysis_engine_status,
             commands::import_and_analyze,
+            commands::katago_status,
+            commands::install_katago,
+            commands::auto_start_engine,
+            commands::auto_start_analysis_engine,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

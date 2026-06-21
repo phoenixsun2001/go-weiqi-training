@@ -36,7 +36,8 @@ const emptySnapshot = (size = 19): BoardSnapshot => ({
 });
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  snapshot: null,
+  // 初始即给一个空棋盘，确保棋盘立即可渲染（即使 IPC 尚未返回）
+  snapshot: emptySnapshot(19),
   elo: null,
   loading: false,
   error: null,

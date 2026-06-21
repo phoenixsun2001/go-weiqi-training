@@ -48,8 +48,8 @@ export default function GuessView() {
   };
 
   return (
-    <div style={{ display: "flex", gap: 24, padding: 16 }}>
-      <div>
+    <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
+      <div style={{ flexShrink: 0 }}>
         <h2>猜棋训练</h2>
         {snapshot ? (
           <Board snapshot={snapshot} interactive={false} size={480} />
@@ -58,7 +58,7 @@ export default function GuessView() {
         )}
       </div>
 
-      <div style={{ minWidth: 280, maxWidth: 360 }}>
+      <div style={{ minWidth: 280, width: 320, flexShrink: 1 }}>
         {puzzle && (
           <>
             <h3>

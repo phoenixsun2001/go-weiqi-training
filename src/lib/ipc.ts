@@ -65,6 +65,12 @@ export const ipc = {
     invoke<AnalysisReport>("import_and_analyze", {
       args: { sgf, threshold: threshold ?? null },
     }),
+
+  // KataGo 一键安装与自动启动
+  katagoStatus: () => invoke<{ installed: boolean; binary_path: string }>("katago_status"),
+  installKatago: () => invoke<string>("install_katago"),
+  autoStartEngine: (difficulty: number) => invoke<EngineStatus>("auto_start_engine", { difficulty }),
+  autoStartAnalysisEngine: () => invoke<{ running: boolean }>("auto_start_analysis_engine"),
 };
 
 type Color = import("../types").Color;

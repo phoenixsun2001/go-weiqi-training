@@ -84,8 +84,10 @@ export default function Board({ snapshot, onPlay, interactive, size = 540 }: Pro
       style={{
         cursor: interactive ? "pointer" : "default",
         background: "#ddb86b",
-        maxWidth: "100%",
-        height: "auto",
+        display: "block",
+        flexShrink: 0,
+        width: size,
+        height: size,
       }}
     />
   );

@@ -633,6 +633,72 @@ fn extract_size(sgf: &str) -> usize {
         .unwrap_or(19)
 }
 
+// ============ KataGo 一键安装 ============
+
+#[derive(Serialize)]
+pub struct KatagoSetupStatus {
+    pub installed: bool,
+    pub binary_path: String,
+}
+
+#[tauri::command]
+pub fn katago_status() -> Result<KatagoSetupStatus, AppError> {
+    Ok(KatagoSetupStatus {
+        installed: crate::katago_setup::is_installed(),
+        binary_path: crate::katago_setup::katago_binary_path().to_string_lossy().into_owned(),
+    })
+}
+
+/// 一键下载安装 KataGo（OpenCL 版 + 权重 + 配置）
+#[tauri::command]
+pub fn install_katago() -> Result<String, AppError> {
+    let msg = crate::katago_setup::install()?;
+    Ok(msg)
+}
+
+/// 用已安装的 KataGo 一键启动对战引擎（无需手动填路径）
+#[tauri::command]
+pub fn auto_start_engine(state: State<AppState>, difficulty: i32) -> Result<EngineStatus, AppError> {
+    let binary = crate::katago_setup::katago_binary_path();
+    let args = crate::katago_setup::gtp_args();
+    if !binary.exists() {
+        return Err(AppError::Engine(
+            "KataGo 尚未安装，请先点击一键安装".into(),
+        ));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let handle = EngineHandle::spawn(&binary.to_string_lossy(), &arg_refs)?;
+    let size = state.game.lock().unwrap().size();
+    let _ = handle.command(&format!("boardsize {size}"));
+    let visits = dan_to_max_visits(difficulty);
+    let _ = handle.command(&format!("kata-set-param maxVisits {visits}"));
+    *state.engine.lock().unwrap() = Some(handle);
+    *state.difficulty.lock().unwrap() = difficulty;
+    Ok(EngineStatus {
+        running: true,
+        difficulty,
+    })
+}
+
+/// 用已安装的 KataGo 一键启动复盘分析引擎
+#[tauri::command]
+pub fn auto_start_analysis_engine(state: State<AppState>) -> Result<AnalysisEngineStatus, AppError> {
+    let binary = crate::katago_setup::katago_binary_path();
+    let args = crate::katago_setup::gtp_args();
+    if !binary.exists() {
+        return Err(AppError::Engine(
+            "KataGo 尚未安装，请先点击一键安装".into(),
+        ));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let handle = EngineHandle::spawn(&binary.to_string_lossy(), &arg_refs)?;
+    let size = state.game.lock().unwrap().size();
+    let _ = handle.command(&format!("boardsize {size}"));
+    *state.analysis_engine.lock().unwrap() = Some(handle);
+    Ok(AnalysisEngineStatus { running: true })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

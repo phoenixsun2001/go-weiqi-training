@@ -5,7 +5,7 @@
   "identifier": "com.goq.training",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://127.0.0.1:8787",
+    "devUrl": "http://127.0.0.1:6173",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },

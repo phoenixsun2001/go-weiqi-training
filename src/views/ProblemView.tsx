@@ -76,8 +76,8 @@ export default function ProblemView() {
   };
 
   return (
-    <div style={{ display: "flex", gap: 24, padding: 16 }}>
-      <div>
+    <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
+      <div style={{ flexShrink: 0 }}>
         <h2>针对性题库训练</h2>
         {snapshot ? (
           <Board snapshot={snapshot} interactive={false} size={480} />

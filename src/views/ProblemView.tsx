@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import Board from "../components/Board";
+import Board, { xyToGtp } from "../components/Board";
 import { ipc } from "../lib/ipc";
 import type { BoardSnapshot, ProblemDto, WeaknessDto, WrongBookDto } from "../types";
 
@@ -7,25 +7,29 @@ interface AnswerState {
   submitted: boolean;
   correct: boolean;
   answerVertex: string;
+  answerXy: { x: number; y: number }[];
 }
 
 export default function ProblemView() {
   const [problem, setProblem] = useState<ProblemDto | null>(null);
   const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(null);
-  const [answer, setAnswer] = useState("");
+  const [pickedVertex, setPickedVertex] = useState<string | null>(null);
+  const [pickedXy, setPickedXy] = useState<{ x: number; y: number } | null>(null);
   const [answerState, setAnswerState] = useState<AnswerState | null>(null);
   const [weakness, setWeakness] = useState<WeaknessDto[]>([]);
   const [wrongBook, setWrongBook] = useState<WrongBookDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [solved, setSolved] = useState(0);
   const [attempted, setAttempted] = useState(0);
+  const [difficulty, setDifficulty] = useState<number>(0); // 0 = 自动(跟随棋力)
 
   const loadProblem = useCallback(async () => {
     setError(null);
     setAnswerState(null);
-    setAnswer("");
+    setPickedVertex(null);
+    setPickedXy(null);
     try {
-      const p = await ipc.nextProblem();
+      const p = await ipc.nextProblem(difficulty > 0 ? difficulty : undefined);
       if (!p) {
         setProblem(null);
         setSnapshot(null);
@@ -37,15 +41,15 @@ export default function ProblemView() {
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [difficulty]);
 
   const loadReports = useCallback(async () => {
     try {
       const [w, wb] = await Promise.all([ipc.weaknessReport(), ipc.wrongBook()]);
       setWeakness(w);
       setWrongBook(wb);
-    } catch (e) {
-      // 忽略报告加载错误
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -54,17 +58,31 @@ export default function ProblemView() {
     loadReports();
   }, [loadProblem, loadReports]);
 
+  const handleBoardClick = (x: number, y: number) => {
+    if (answerState?.submitted || !problem) return;
+    const n = snapshot?.size ?? 19;
+    setPickedXy({ x, y });
+    setPickedVertex(xyToGtp(x, y, n));
+  };
+
   const handleSubmit = async () => {
-    if (!problem || !answer.trim()) return;
+    if (!problem || !pickedVertex) return;
     try {
-      const res = await ipc.submitAnswer(problem.id, answer.trim());
+      const res = await ipc.submitAnswer(problem.id, pickedVertex);
+      // 解析答案顶点为坐标（用于在棋盘上标记正解）
+      const n = snapshot?.size ?? 19;
+      const answerXy = res.answer_vertex
+        .split(/\s+/)
+        .map((v) => gtpToXy(v, n))
+        .filter((p): p is { x: number; y: number } => p !== null);
       setAnswerState({
         submitted: true,
         correct: res.correct,
         answerVertex: res.answer_vertex,
+        answerXy,
       });
-      setAttempted((n) => n + 1);
-      if (res.correct) setSolved((n) => n + 1);
+      setAttempted((n2) => n2 + 1);
+      if (res.correct) setSolved((n2) => n2 + 1);
       await loadReports();
     } catch (e) {
       setError(String(e));
@@ -75,41 +93,73 @@ export default function ProblemView() {
     loadProblem();
   };
 
+  // 棋盘标记：正解标 ○，用户答案标 ✗（错时）
+  const marks: { x: number; y: number; label: string; color?: string }[] = [];
+  if (answerState?.submitted) {
+    for (const p of answerState.answerXy) {
+      marks.push({ x: p.x, y: p.y, label: "●", color: "#389e0d" });
+    }
+    if (!answerState.correct && pickedXy) {
+      marks.push({ x: pickedXy.x, y: pickedXy.y, label: "✗", color: "#cf1322" });
+    }
+  } else if (pickedXy && !answerState?.submitted) {
+    marks.push({ x: pickedXy.x, y: pickedXy.y, label: "?", color: "#1890ff" });
+  }
+
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
       <div style={{ flexShrink: 0 }}>
         <h2>针对性题库训练</h2>
         {snapshot ? (
-          <Board snapshot={snapshot} interactive={false} size={480} />
+          <Board
+            snapshot={snapshot}
+            onPlay={handleBoardClick}
+            interactive={!answerState?.submitted}
+            size={480}
+            showCoords
+            marks={marks}
+          />
         ) : (
           <p>{error ?? "加载中…"}</p>
         )}
       </div>
 
       <div style={{ minWidth: 280, maxWidth: 360 }}>
+        {/* 难度选择 */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 13 }}>难度筛选：</label>
+          <select
+            value={difficulty}
+            onChange={(e) => setDifficulty(Number(e.target.value))}
+            style={{ marginLeft: 8, padding: 4 }}
+          >
+            <option value={0}>自动（跟随棋力）</option>
+            {[1, 2, 3, 4, 5].map((d) => (
+              <option key={d} value={d}>
+                ≤ 业余 {d} 段
+              </option>
+            ))}
+          </select>
+        </div>
+
         {problem && (
           <>
             <h3>
               {problem.category_label} · 难度 {problem.difficulty}
             </h3>
             <p style={{ fontSize: 13, color: "#666", marginTop: -4 }}>
-              题号 #{problem.id} —— 题目优先按你的弱点分类出题
+              题号 #{problem.id} —— 在棋盘上点击你的答案
             </p>
 
-            <label style={{ fontSize: 13 }}>输入你的答案（GTP 顶点，如 D4）：</label>
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              <input
-                type="text"
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="如 D4"
-                disabled={answerState?.submitted}
-                style={{ flex: 1, padding: 6, textTransform: "uppercase" }}
-                onKeyDown={(e) => e.key === "Enter" && !answerState?.submitted && handleSubmit()}
-              />
+            <div style={{ marginTop: 8, padding: 8, background: "#f6f8fa", borderRadius: 4 }}>
+              <span style={{ fontSize: 13 }}>你的答案：</span>
+              <strong>{pickedVertex ?? "（点击棋盘选择）"}</strong>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               {!answerState?.submitted ? (
-                <button onClick={handleSubmit} disabled={!answer.trim()}>
-                  提交
+                <button onClick={handleSubmit} disabled={!pickedVertex}>
+                  提交答案
                 </button>
               ) : (
                 <button onClick={handleNext}>下一题</button>
@@ -131,6 +181,7 @@ export default function ProblemView() {
                 </strong>
                 <p style={{ margin: "6px 0 0" }}>
                   正解：<strong>{answerState.answerVertex}</strong>
+                  <span style={{ fontSize: 12, color: "#666" }}>（绿点标记）</span>
                 </p>
                 <p style={{ margin: "6px 0 0", fontSize: 13, color: "#444" }}>
                   {problem.explanation}
@@ -142,15 +193,12 @@ export default function ProblemView() {
 
         <hr style={{ margin: "16px 0", border: "none", borderTop: "1px solid #eee" }} />
 
-        <div style={{ fontSize: 13 }}>
-          本轮：{solved} / {attempted} 正确
-        </div>
+        <div style={{ fontSize: 13 }}>本轮：{solved} / {attempted} 正确</div>
 
-        {/* 弱点统计 */}
         <h4 style={{ marginBottom: 4 }}>弱点分析（驱动针对性出题）</h4>
         {weakness.length === 0 ? (
           <p style={{ fontSize: 12, color: "#999" }}>
-            暂无数据。完成复盘后，失误类型会自动累积到此处，指导出题优先级。
+            暂无数据。完成复盘后，失误类型会自动累积，指导出题优先级。
           </p>
         ) : (
           <table style={{ fontSize: 12, borderCollapse: "collapse", width: "100%" }}>
@@ -177,7 +225,6 @@ export default function ProblemView() {
           </table>
         )}
 
-        {/* 错题本 */}
         <h4 style={{ marginBottom: 4, marginTop: 16 }}>错题本</h4>
         {wrongBook.length === 0 ? (
           <p style={{ fontSize: 12, color: "#999" }}>暂无记录。</p>
@@ -195,12 +242,10 @@ export default function ProblemView() {
   );
 }
 
-/// 把题目 SGF 解析为只读棋盘快照（黑手摆出来作为题目局面）
 function sgfToSnapshot(sgf: string): BoardSnapshot {
   const sizeMatch = sgf.match(/SZ\[(\d+)\]/);
   const size = sizeMatch ? Number(sizeMatch[1]) : 19;
   const stones: BoardSnapshot["stones"] = Array(size * size).fill(null);
-  // 匹配 ;B[xy] / ;W[xy]（xy 为小写 SGF 坐标）
   const re = /;([BW])\[([a-z]{2})\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(sgf)) !== null) {
@@ -212,4 +257,14 @@ function sgfToSnapshot(sgf: string): BoardSnapshot {
     }
   }
   return { size, stones, turn: "black" };
+}
+
+/** GTP 顶点转内部坐标（与 Board.tsx 的 xyToGtp 互逆） */
+function gtpToXy(gtp: string, size: number): { x: number; y: number } | null {
+  if (gtp.length < 2) return null;
+  const col = gtp[0].toUpperCase();
+  const x = col <= "H" ? col.charCodeAt(0) - 65 : col.charCodeAt(0) - 66;
+  const y = size - parseInt(gtp.slice(1));
+  if (x < 0 || x >= size || y < 0 || y >= size || isNaN(y)) return null;
+  return { x, y };
 }

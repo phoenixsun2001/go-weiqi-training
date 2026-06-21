@@ -151,7 +151,7 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
       {sgf && currentSnapshot && (
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
           <div style={{ flexShrink: 0 }}>
-            <Board snapshot={currentSnapshot} interactive={false} size={520} />
+            <Board snapshot={currentSnapshot} interactive={false} size={520} showCoords />
             {/* 导航控件 */}
             <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 8 }}>
               <button onClick={() => setCurrent(0)} title="首手">⏮</button>

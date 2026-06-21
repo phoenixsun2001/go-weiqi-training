@@ -43,7 +43,8 @@ export const ipc = {
   aiMove: (userColor: Color) => invoke<AiMoveResult>("ai_move", { args: { user_color: userColor } }),
 
   // 题库训练
-  nextProblem: () => invoke<ProblemDto | null>("next_problem"),
+  nextProblem: (maxDifficulty?: number) =>
+    invoke<ProblemDto | null>("next_problem", { args: { max_difficulty: maxDifficulty ?? null } }),
   submitAnswer: (problemId: number, userAnswer: string) =>
     invoke<SubmitResult>("submit_answer", { args: { problem_id: problemId, user_answer: userAnswer } }),
   wrongBook: () => invoke<WrongBookDto[]>("wrong_book"),

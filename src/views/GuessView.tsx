@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import Board from "../components/Board";
+import Board, { xyToGtp } from "../components/Board";
 import { ipc } from "../lib/ipc";
 import type { BoardSnapshot, GuessDto, GuessResult } from "../types";
 
 export default function GuessView() {
   const [puzzle, setPuzzle] = useState<GuessDto | null>(null);
   const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(null);
-  const [guess, setGuess] = useState("");
+  const [pickedVertex, setPickedVertex] = useState<string | null>(null);
+  const [pickedXy, setPickedXy] = useState<{ x: number; y: number } | null>(null);
   const [result, setResult] = useState<GuessResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [correct, setCorrect] = useState(0);
@@ -15,7 +16,8 @@ export default function GuessView() {
   const loadNext = useCallback(async () => {
     setError(null);
     setResult(null);
-    setGuess("");
+    setPickedVertex(null);
+    setPickedXy(null);
     try {
       const p = await ipc.nextGuess();
       if (!p) {
@@ -35,10 +37,17 @@ export default function GuessView() {
     loadNext();
   }, [loadNext]);
 
+  const handleBoardClick = (x: number, y: number) => {
+    if (result || !puzzle) return;
+    const n = snapshot?.size ?? 19;
+    setPickedXy({ x, y });
+    setPickedVertex(xyToGtp(x, y, n));
+  };
+
   const handleCheck = async () => {
-    if (!puzzle || !guess.trim()) return;
+    if (!puzzle || !pickedVertex) return;
     try {
-      const res = await ipc.checkGuess(puzzle.id, guess.trim());
+      const res = await ipc.checkGuess(puzzle.id, pickedVertex);
       setResult(res);
       setTotal((n) => n + 1);
       if (res.correct) setCorrect((n) => n + 1);
@@ -47,12 +56,34 @@ export default function GuessView() {
     }
   };
 
+  // 标记
+  const marks: { x: number; y: number; label: string; color?: string }[] = [];
+  if (result) {
+    const n = snapshot?.size ?? 19;
+    for (const v of result.answer_vertex.split(/\s+/)) {
+      const p = gtpToXy(v, n);
+      if (p) marks.push({ x: p.x, y: p.y, label: "●", color: "#389e0d" });
+    }
+    if (!result.correct && pickedXy) {
+      marks.push({ x: pickedXy.x, y: pickedXy.y, label: "✗", color: "#cf1322" });
+    }
+  } else if (pickedXy) {
+    marks.push({ x: pickedXy.x, y: pickedXy.y, label: "?", color: "#1890ff" });
+  }
+
   return (
     <div style={{ display: "flex", gap: 24, padding: 16, alignItems: "flex-start" }}>
       <div style={{ flexShrink: 0 }}>
         <h2>猜棋训练</h2>
         {snapshot ? (
-          <Board snapshot={snapshot} interactive={false} size={480} />
+          <Board
+            snapshot={snapshot}
+            onPlay={handleBoardClick}
+            interactive={!result}
+            size={480}
+            showCoords
+            marks={marks}
+          />
         ) : (
           <p>{error ?? "加载中…"}</p>
         )}
@@ -65,23 +96,18 @@ export default function GuessView() {
               {puzzle.category_label} · 难度 {puzzle.difficulty}
             </h3>
             <p style={{ fontSize: 13, color: "#666", marginTop: -4 }}>
-              看局面，猜下一手。训练读盘与第一感。
+              看局面，猜下一手。在棋盘上点击你的答案。
             </p>
 
-            <label style={{ fontSize: 13 }}>你的猜测（GPT 顶点，如 D4）：</label>
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              <input
-                type="text"
-                value={guess}
-                onChange={(e) => setGuess(e.target.value)}
-                placeholder="如 D4"
-                disabled={result !== null}
-                style={{ flex: 1, padding: 6, textTransform: "uppercase" }}
-                onKeyDown={(e) => e.key === "Enter" && result === null && handleCheck()}
-              />
-              {result === null ? (
-                <button onClick={handleCheck} disabled={!guess.trim()}>
-                  揭晓
+            <div style={{ marginTop: 8, padding: 8, background: "#f6f8fa", borderRadius: 4 }}>
+              <span style={{ fontSize: 13 }}>你的猜测：</span>
+              <strong>{pickedVertex ?? "（点击棋盘选择）"}</strong>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              {!result ? (
+                <button onClick={handleCheck} disabled={!pickedVertex}>
+                  揭晓答案
                 </button>
               ) : (
                 <button onClick={loadNext}>下一题</button>
@@ -103,6 +129,7 @@ export default function GuessView() {
                 </strong>
                 <p style={{ margin: "6px 0 0" }}>
                   正解：<strong>{result.answer_vertex}</strong>
+                  <span style={{ fontSize: 12, color: "#666" }}>（绿点标记）</span>
                 </p>
                 <p style={{ margin: "6px 0 0", fontSize: 13, color: "#444" }}>
                   {result.explanation}
@@ -121,7 +148,6 @@ export default function GuessView() {
   );
 }
 
-/// 把局面 SGF 解析为只读棋盘快照
 function sgfToSnapshot(sgf: string): BoardSnapshot {
   const sizeMatch = sgf.match(/SZ\[(\d+)\]/);
   const size = sizeMatch ? Number(sizeMatch[1]) : 19;
@@ -137,4 +163,13 @@ function sgfToSnapshot(sgf: string): BoardSnapshot {
     }
   }
   return { size, stones, turn: "black" };
+}
+
+function gtpToXy(gtp: string, size: number): { x: number; y: number } | null {
+  if (gtp.length < 2) return null;
+  const col = gtp[0].toUpperCase();
+  const x = col <= "H" ? col.charCodeAt(0) - 65 : col.charCodeAt(0) - 66;
+  const y = size - parseInt(gtp.slice(1));
+  if (x < 0 || x >= size || y < 0 || y >= size || isNaN(y)) return null;
+  return { x, y };
 }

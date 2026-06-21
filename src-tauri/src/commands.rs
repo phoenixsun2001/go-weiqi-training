@@ -297,12 +297,21 @@ pub struct ProblemDto {
 }
 
 /// 取下一道题（弱点驱动的针对性选题）
+#[derive(Deserialize)]
+pub struct NextProblemArgs {
+    /// 指定难度上限（1..=9）；None 则跟随用户棋力（段位+1）
+    pub max_difficulty: Option<i32>,
+}
+
 #[tauri::command]
-pub fn next_problem(state: State<AppState>) -> Result<Option<ProblemDto>, AppError> {
+pub fn next_problem(state: State<AppState>, args: NextProblemArgs) -> Result<Option<ProblemDto>, AppError> {
     let store = state.store.lock().unwrap();
-    let profile = store.load_profile()?.ok_or_else(|| AppError::Rule("无用户档案".into()))?;
-    // 难度上限跟随用户段位（跳一跳够得着）
-    let max_diff = rating_service::dan_from_elo(profile.elo) + 1;
+    let max_diff = if let Some(d) = args.max_difficulty {
+        d
+    } else {
+        let profile = store.load_profile()?.ok_or_else(|| AppError::Rule("无用户档案".into()))?;
+        rating_service::dan_from_elo(profile.elo) + 1
+    };
     let db = ProblemDb::new(store.conn_ref());
     let row = db.next_problem(max_diff)?;
     Ok(row.map(|p| ProblemDto {

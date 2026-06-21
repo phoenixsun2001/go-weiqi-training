@@ -21,3 +21,8 @@ parking_lot = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+# 降低优化级别避免 rustc 1.96 release 模式栈溢出崩溃
+opt-level = 1
+codegen-units = 16

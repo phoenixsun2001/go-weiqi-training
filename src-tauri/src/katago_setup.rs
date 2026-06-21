@@ -98,15 +98,15 @@ logToStdout = true
 # 棋盘
 maxBoardSize = 19
 
-# 搜索参数（默认强度，对战时会通过 GTP 动态调整 maxVisits）
-maxVisits = 800
-numSearchThreads = 4
+# 搜索参数（保守配置避免 OOM 崩溃）
+maxVisits = 300
+numSearchThreads = 3
 
-# 神经网络（OpenCL 后端）
+# 神经网络（OpenCL 后端，降低内存占用）
 nnMaxBatchSize = 8
-nnCacheSizePowerOfTwo = 21
-nnMutexPoolSizePowerOfTwo = 14
-numNNServerThreadsPerModel = 2
+nnCacheSizePowerOfTwo = 19
+nnMutexPoolSizePowerOfTwo = 12
+numNNServerThreadsPerModel = 1
 
 # OpenCL 后端
 trtPredict = false

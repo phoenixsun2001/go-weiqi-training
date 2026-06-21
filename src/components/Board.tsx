@@ -23,7 +23,7 @@ export default function Board({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 当前尺寸档位索引
-  const SIZES = [360, 420, 480, 540, 600, 660, 720, 780, 840];
+  const SIZES = [360, 420, 480, 540, 600, 660, 720, 780, 840, 960, 1080, 1200];
   const [sizeIdx, setSizeIdx] = useState(4); // 默认 600px
 
   // 初始化：尝试根据窗口高度选合适档位

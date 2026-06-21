@@ -189,7 +189,8 @@ async function maybeAiMove(
   const { aiMode, userColor, snapshot } = get();
   if (!aiMode || !snapshot) return;
   if (snapshot.turn !== aiColor(userColor)) return;
-  set({ aiThinking: true });
+  // 在 AI 思考期间也锁住 loading，防止用户并发落子导致引擎管道冲突
+  set({ aiThinking: true, loading: true });
   // 模拟人类思考节奏：延迟 0.8-2 秒
   const thinkTime = 800 + Math.random() * 1200;
   await new Promise((r) => setTimeout(r, thinkTime));
@@ -214,7 +215,7 @@ async function maybeAiMove(
   } catch (e) {
     setError(set, String(e), "engine");
   } finally {
-    set({ aiThinking: false });
+    set({ aiThinking: false, loading: false });
   }
 }
 

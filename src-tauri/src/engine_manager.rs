@@ -58,8 +58,16 @@ impl EngineHandle {
     pub fn command(&self, cmd: &str) -> AppResult<String> {
         {
             let mut stdin = self.stdin.lock().unwrap();
-            writeln!(stdin, "{cmd}")?;
-            stdin.flush()?;
+            if let Err(e) = writeln!(stdin, "{cmd}") {
+                return Err(AppError::Engine(format!(
+                    "引擎管道写入失败（引擎可能已崩溃）: {e}"
+                )));
+            }
+            if let Err(e) = stdin.flush() {
+                return Err(AppError::Engine(format!(
+                    "引擎管道刷新失败: {e}"
+                )));
+            }
         }
         let mut stdout = self.stdout.lock().unwrap();
         let mut buf = String::new();
@@ -67,32 +75,41 @@ impl EngineHandle {
         let mut found_response_start = false;
         loop {
             buf.clear();
-            let n = stdout.read_line(&mut buf)?;
+            let n = match stdout.read_line(&mut buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    return Err(AppError::Engine(format!(
+                        "引擎管道读取失败（引擎可能已崩溃）: {e}"
+                    )));
+                }
+            };
             if n == 0 {
-                break; // 进程关闭
+                // 进程已关闭（EOF），说明 KataGo 崩溃了
+                if found_response_start {
+                    break; // 已读到响应，正常结束
+                }
+                return Err(AppError::Engine(
+                    "KataGo 引擎已意外关闭（进程退出）。请重新启动引擎。".into(),
+                ));
             }
             let line = buf.trim_end_matches(['\n', '\r']);
-            // 跳过空行（如果不是响应结束前的空行）
             if line.is_empty() {
                 if found_response_start {
-                    break; // GTP 响应以空行结束
+                    break;
                 }
-                continue; // 初始化期间的空行，跳过
+                continue;
             }
-            // GTP 响应以 = 或 ? 开头
             if line.starts_with('=') || line.starts_with('?') {
                 found_response_start = true;
                 collected = line.to_string();
                 continue;
             }
-            // 响应开始后的后续行（多行响应，如分析数据）
             if found_response_start {
                 if !collected.is_empty() {
                     collected.push('\n');
                 }
                 collected.push_str(line);
             }
-            // 否则是 KataGo 的日志输出行，跳过
         }
         parse_gtp_response(&collected)
     }

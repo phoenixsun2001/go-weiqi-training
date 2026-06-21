@@ -52,6 +52,13 @@ pub fn play_move(state: State<AppState>, x: usize, y: usize) -> Result<PlayResul
     let turn_before = game.turn();
     let captured = game.play(turn_before, (x, y))?;
     let turn_after = game.turn();
+    // 同步到 KataGo 引擎（如果已启动），保持双方棋盘一致
+    let size = game.size();
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        let color = color_str(turn_before);
+        let vertex = xy_to_gtp(x, y, size).unwrap_or_else(|_| "pass".into());
+        let _ = engine.command(&format!("play {color} {vertex}"));
+    }
     Ok(PlayResult {
         captured,
         turn: color_str(turn_after),
@@ -64,6 +71,11 @@ pub fn pass_move(state: State<AppState>) -> Result<PlayResult, AppError> {
     let mut game = state.game.lock().unwrap();
     let turn_before = game.turn();
     game.pass(turn_before)?;
+    // 同步 pass 到 KataGo
+    if let Some(engine) = state.engine.lock().unwrap().as_ref() {
+        let color = color_str(turn_before);
+        let _ = engine.command(&format!("play {color} pass"));
+    }
     Ok(PlayResult {
         captured: 0,
         turn: color_str(game.turn()),

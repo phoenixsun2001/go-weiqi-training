@@ -36,7 +36,7 @@ impl EngineHandle {
             .current_dir(&working_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()?;
         let stdin = child
             .stdin

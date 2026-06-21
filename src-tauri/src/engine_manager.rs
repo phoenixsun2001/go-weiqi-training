@@ -23,12 +23,20 @@ pub struct EngineHandle {
 
 impl EngineHandle {
     /// 启动 KataGo 进程。binary_path 为 katago 可执行文件路径。
+    /// 工作目录自动设为二进制所在目录（KataGo 需要访问 tuning 缓存等相对路径）。
     pub fn spawn(binary_path: &str, args: &[&str]) -> AppResult<Self> {
+        // 工作目录设为二进制所在目录
+        let working_dir = std::path::Path::new(binary_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
         let mut child = Command::new(binary_path)
             .args(args)
+            .current_dir(&working_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
         let stdin = child
             .stdin
@@ -45,7 +53,8 @@ impl EngineHandle {
         })
     }
 
-    /// 发送 GTP 命令并读取直到空行（标准 GTP 响应边界）
+    /// 发送 GTP 命令并读取直到空行（标准 GTP 响应边界）。
+    /// 自动跳过 KataGo 的日志输出行（不以 = 或 ? 开头的行）。
     pub fn command(&self, cmd: &str) -> AppResult<String> {
         {
             let mut stdin = self.stdin.lock().unwrap();
@@ -55,20 +64,35 @@ impl EngineHandle {
         let mut stdout = self.stdout.lock().unwrap();
         let mut buf = String::new();
         let mut collected = String::new();
+        let mut found_response_start = false;
         loop {
             buf.clear();
             let n = stdout.read_line(&mut buf)?;
             if n == 0 {
-                break;
+                break; // 进程关闭
             }
             let line = buf.trim_end_matches(['\n', '\r']);
+            // 跳过空行（如果不是响应结束前的空行）
             if line.is_empty() {
-                break; // 空行 = 响应结束
+                if found_response_start {
+                    break; // GTP 响应以空行结束
+                }
+                continue; // 初始化期间的空行，跳过
             }
-            if !collected.is_empty() {
-                collected.push('\n');
+            // GTP 响应以 = 或 ? 开头
+            if line.starts_with('=') || line.starts_with('?') {
+                found_response_start = true;
+                collected = line.to_string();
+                continue;
             }
-            collected.push_str(line);
+            // 响应开始后的后续行（多行响应，如分析数据）
+            if found_response_start {
+                if !collected.is_empty() {
+                    collected.push('\n');
+                }
+                collected.push_str(line);
+            }
+            // 否则是 KataGo 的日志输出行，跳过
         }
         parse_gtp_response(&collected)
     }

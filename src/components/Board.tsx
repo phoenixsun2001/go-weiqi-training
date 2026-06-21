@@ -21,10 +21,14 @@ export default function Board({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // 自适应模式下的实际渲染尺寸
-  const [adaptiveSize, setAdaptiveSize] = useState(size ?? 540);
+  // 自适应模式下的实际渲染尺寸（从固定档位中选取）
+  const [adaptiveSize, setAdaptiveSize] = useState(size ?? 600);
 
-  // 监听容器宽度变化（仅在未指定固定 size 时启用自适应）
+  // 固定档位：保证 cell（格子像素）能被棋盘线数整除，避免对齐偏差
+  // 19路：cell = size/20（含边距），选 size 为 20 的倍数最理想
+  const SIZES = [360, 420, 480, 540, 600, 660, 720, 780, 840];
+
+  // 监听容器宽度变化，从固定档位中选最接近（不超过）的尺寸
   useEffect(() => {
     if (size !== undefined) {
       setAdaptiveSize(size);
@@ -34,10 +38,14 @@ export default function Board({
     if (!container) return;
     const updateSize = () => {
       const w = container.clientWidth;
-      // 取容器宽度和可视高度的较小值，保证棋盘不超出
-      const maxH = window.innerHeight - 120;
-      const s = Math.max(200, Math.min(w, maxH));
-      setAdaptiveSize(s);
+      const maxH = window.innerHeight - 100;
+      const target = Math.min(w, maxH);
+      // 从档位中选不超过 target 的最大值；若都比 target 大则选最小的
+      let best = SIZES[0];
+      for (const s of SIZES) {
+        if (s <= target) best = s;
+      }
+      setAdaptiveSize(best);
     };
     updateSize();
     const observer = new ResizeObserver(updateSize);
@@ -49,7 +57,6 @@ export default function Board({
     };
   }, [size]);
 
-  // 实际渲染尺寸
   const renderSize = size ?? adaptiveSize;
 
   useEffect(() => {
@@ -156,7 +163,7 @@ export default function Board({
   };
 
   return (
-    <div ref={containerRef} style={{ display: "inline-block" }}>
+    <div ref={containerRef} style={{ display: "inline-block", width: renderSize, height: renderSize }}>
       <canvas
         ref={canvasRef}
         width={renderSize}
@@ -166,10 +173,8 @@ export default function Board({
           cursor: interactive ? "pointer" : "default",
           background: "#ddb86b",
           display: "block",
-          width: "100%",
-          maxWidth: renderSize,
-          height: "auto",
-          aspectRatio: "1 / 1",
+          width: renderSize,
+          height: renderSize,
         }}
       />
     </div>

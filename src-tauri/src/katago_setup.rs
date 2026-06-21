@@ -1,13 +1,22 @@
 use crate::error::{AppError, AppResult};
 use std::path::{Path, PathBuf};
 
-/// KataGo 安装目录（应用数据目录下）
+/// KataGo 安装目录：优先找 src-tauri/katago（开发期手动放置），其次 cwd/katago
 pub fn katago_dir() -> PathBuf {
-    let base = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("katago");
-    let _ = std::fs::create_dir_all(&base);
-    base
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // 候选：src-tauri/katago（Tauri dev 运行时 cwd=src-tauri，手动放置的文件在这里）
+    let candidate = cwd.join("katago");
+    if candidate.join("katago.exe").exists() {
+        return candidate;
+    }
+    // 也有可能 cwd 是项目根，文件在 src-tauri/katago
+    let candidate2 = cwd.join("src-tauri").join("katago");
+    if candidate2.join("katago.exe").exists() {
+        return candidate2;
+    }
+    // 都没有则返回默认（用于安装）
+    let _ = std::fs::create_dir_all(&candidate);
+    candidate
 }
 
 pub fn katago_binary_path() -> PathBuf {
@@ -15,7 +24,15 @@ pub fn katago_binary_path() -> PathBuf {
 }
 
 pub fn katago_model_path() -> PathBuf {
-    katago_dir().join("model.bin.gz")
+    let dir = katago_dir();
+    // 优先找已知文件名
+    for name in ["b18c384nbt-uec.bin.gz", "kata1_b18c384nbt-65d471d3.bin.gz", "model.bin.gz"] {
+        let p = dir.join(name);
+        if p.exists() {
+            return p;
+        }
+    }
+    dir.join("model.bin.gz")
 }
 
 pub fn katago_config_path() -> PathBuf {

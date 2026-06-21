@@ -3,11 +3,25 @@ import GameView from "./views/GameView";
 import ReviewView from "./views/ReviewView";
 import ProblemView from "./views/ProblemView";
 import GuessView from "./views/GuessView";
+import LibraryView from "./views/LibraryView";
 
-type Tab = "game" | "review" | "problem" | "guess";
+type Tab = "game" | "review" | "library" | "problem" | "guess";
+
+/** 从对局库传入复盘页的待分析对局 */
+interface PendingReview {
+  gameId: number;
+  sgf: string;
+}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("game");
+  const [pendingReview, setPendingReview] = useState<PendingReview | null>(null);
+
+  const handleReviewGame = (gameId: number, sgf: string) => {
+    setPendingReview({ gameId, sgf });
+    setTab("review");
+  };
+
   return (
     <div style={{ fontFamily: "sans-serif" }}>
       <header
@@ -26,6 +40,9 @@ export default function App() {
           <button onClick={() => setTab("review")} style={tabBtn(tab === "review")}>
             复盘
           </button>
+          <button onClick={() => setTab("library")} style={tabBtn(tab === "library")}>
+            对局库
+          </button>
           <button onClick={() => setTab("problem")} style={tabBtn(tab === "problem")}>
             题库
           </button>
@@ -37,7 +54,9 @@ export default function App() {
       {tab === "game" ? (
         <GameView />
       ) : tab === "review" ? (
-        <ReviewView />
+        <ReviewView pendingReview={pendingReview} onReviewed={() => setPendingReview(null)} />
+      ) : tab === "library" ? (
+        <LibraryView onReviewGame={handleReviewGame} />
       ) : tab === "problem" ? (
         <ProblemView />
       ) : (

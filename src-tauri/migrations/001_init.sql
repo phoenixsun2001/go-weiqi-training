@@ -50,3 +50,22 @@ CREATE TABLE IF NOT EXISTS weakness (
     updated_at TEXT NOT NULL
 );
 
+-- 导入对局库（野狐等外部棋谱）
+CREATE TABLE IF NOT EXISTS imported_game (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    imported_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'foxwq',
+    black_name TEXT NOT NULL DEFAULT '',
+    white_name TEXT NOT NULL DEFAULT '',
+    black_rank TEXT NOT NULL DEFAULT '',
+    white_rank TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
+    board_size INTEGER NOT NULL DEFAULT 19,
+    played_date TEXT NOT NULL DEFAULT '',
+    move_count INTEGER NOT NULL DEFAULT 0,
+    sgf TEXT NOT NULL,
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    tags TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT ''
+);
+

@@ -698,6 +698,128 @@ pub fn auto_start_analysis_engine(state: State<AppState>) -> Result<AnalysisEngi
     Ok(AnalysisEngineStatus { running: true })
 }
 
+// ============ 对局库（野狐导入） ============
+
+use crate::imported_game_store::ImportedGameStore;
+use crate::sgf::parse_metadata;
+
+#[derive(Serialize, Clone)]
+pub struct ImportedGameDto {
+    pub id: i64,
+    pub imported_at: String,
+    pub source: String,
+    pub black_name: String,
+    pub white_name: String,
+    pub black_rank: String,
+    pub white_rank: String,
+    pub result: String,
+    pub board_size: i64,
+    pub played_date: String,
+    pub move_count: i64,
+    pub sgf: String,
+    pub reviewed: bool,
+    pub tags: String,
+    pub notes: String,
+}
+
+fn row_to_dto(r: crate::imported_game_store::ImportedGameRow) -> ImportedGameDto {
+    ImportedGameDto {
+        id: r.id,
+        imported_at: r.imported_at,
+        source: r.source,
+        black_name: r.black_name,
+        white_name: r.white_name,
+        black_rank: r.black_rank,
+        white_rank: r.white_rank,
+        result: r.result,
+        board_size: r.board_size,
+        played_date: r.played_date,
+        move_count: r.move_count,
+        sgf: r.sgf,
+        reviewed: r.reviewed,
+        tags: r.tags,
+        notes: r.notes,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ImportGameArgs {
+    pub sgf: String,
+    pub source: Option<String>,
+}
+
+/// 导入 SGF 棋谱到对局库（自动解析元数据）
+#[tauri::command]
+pub fn import_game(state: State<AppState>, args: ImportGameArgs) -> Result<ImportedGameDto, AppError> {
+    let meta = parse_metadata(&args.sgf);
+    if meta.move_count == 0 {
+        return Err(AppError::Rule("棋谱无着手，可能是无效 SGF".into()));
+    }
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    let source = args.source.unwrap_or_else(|| "foxwq".into());
+    let id = db.insert(&source, &meta, &args.sgf)?;
+    let row = db.get(id)?.ok_or_else(|| AppError::Rule("导入后查不到记录".into()))?;
+    Ok(row_to_dto(row))
+}
+
+/// 列出所有导入的对局
+#[tauri::command]
+pub fn list_imported_games(state: State<AppState>) -> Result<Vec<ImportedGameDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    let rows = db.list()?;
+    Ok(rows.into_iter().map(row_to_dto).collect())
+}
+
+/// 获取单条对局详情（含完整 SGF）
+#[tauri::command]
+pub fn get_imported_game(state: State<AppState>, id: i64) -> Result<Option<ImportedGameDto>, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    Ok(db.get(id)?.map(row_to_dto))
+}
+
+/// 删除对局
+#[tauri::command]
+pub fn delete_imported_game(state: State<AppState>, id: i64) -> Result<(), AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    db.delete(id)?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct UpdateGameMetaArgs {
+    pub id: i64,
+    pub reviewed: Option<bool>,
+    pub tags: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// 更新对局的复盘状态/标签/笔记
+#[tauri::command]
+pub fn update_game_meta(
+    state: State<AppState>,
+    args: UpdateGameMetaArgs,
+) -> Result<ImportedGameDto, AppError> {
+    let store = state.store.lock().unwrap();
+    let db = ImportedGameStore::new(store.conn_ref());
+    if let Some(reviewed) = args.reviewed {
+        db.update_reviewed(args.id, reviewed)?;
+    }
+    if args.tags.is_some() || args.notes.is_some() {
+        // 需要先读取现有值再更新（因为 tags/notes 可能只传一个）
+        let existing = db.get(args.id)?.ok_or_else(|| AppError::Rule("对局不存在".into()))?;
+        db.update_tags_notes(
+            args.id,
+            args.tags.as_deref().unwrap_or(&existing.tags),
+            args.notes.as_deref().unwrap_or(&existing.notes),
+        )?;
+    }
+    let row = db.get(args.id)?.ok_or_else(|| AppError::Rule("对局不存在".into()))?;
+    Ok(row_to_dto(row))
+}
 
 #[cfg(test)]
 mod tests {
@@ -718,5 +840,4 @@ mod tests {
         assert_eq!(extract_size("(;GM[1])"), 19); // 默认
     }
 }
-
 

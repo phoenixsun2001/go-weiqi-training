@@ -5,15 +5,21 @@ import type { AnalysisReport, MoveAnalysisDto } from "../types";
 
 const SAMPLE_SGF = "(;GM[1]FF[4]SZ[9]\n;B[ee];W[ed];B[fd];W[ec];B[gc];W[fe])";
 
-export default function ReviewView() {
+interface Props {
+  /** 从对局库传入的待复盘对局 */
+  pendingReview: { gameId: number; sgf: string } | null;
+  /** 复盘完成回调（清除 pendingReview） */
+  onReviewed: () => void;
+}
+
+export default function ReviewView({ pendingReview, onReviewed }: Props) {
   const [sgf, setSgf] = useState(SAMPLE_SGF);
-  const [binaryPath, setBinaryPath] = useState("");
-  const [engineArgs, setEngineArgs] = useState("gtp -model model.bin");
   const [engineRunning, setEngineRunning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autoReviewedId, setAutoReviewedId] = useState<number | null>(null);
 
   useEffect(() => {
     ipc
@@ -22,10 +28,20 @@ export default function ReviewView() {
       .catch(() => {});
   }, []);
 
-  const startEngine = async () => {
+  // 从对局库跳转过来时：预填 SGF
+  useEffect(() => {
+    if (pendingReview) {
+      setSgf(pendingReview.sgf);
+      setReport(null);
+      setCurrent(null);
+      setError(null);
+    }
+  }, [pendingReview]);
+
+  const handleAutoStart = async () => {
     setError(null);
     try {
-      await ipc.startAnalysisEngine(binaryPath, engineArgs.split(/\s+/).filter(Boolean));
+      await ipc.autoStartAnalysisEngine();
       setEngineRunning(true);
     } catch (e) {
       setError(String(e));
@@ -45,6 +61,16 @@ export default function ReviewView() {
       const r = await ipc.importAndAnalyze(sgf, 0.03);
       setReport(r);
       setCurrent(null);
+      // 如果是从对局库来的，自动标记为已复盘
+      if (pendingReview && autoReviewedId !== pendingReview.gameId) {
+        try {
+          await ipc.updateGameMeta(pendingReview.gameId, true);
+          setAutoReviewedId(pendingReview.gameId);
+        } catch {
+          // 标记失败不阻断复盘
+        }
+        onReviewed();
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -67,40 +93,17 @@ export default function ReviewView() {
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
       <h2>AI 复盘分析</h2>
 
-      {/* 分析引擎设置 */}
+      {/* 分析引擎 */}
       <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
         <h3 style={{ marginTop: 0 }}>分析引擎</h3>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ fontSize: 13 }}>
-            KataGo 路径
-            <input
-              type="text"
-              value={binaryPath}
-              onChange={(e) => setBinaryPath(e.target.value)}
-              disabled={engineRunning}
-              placeholder="如 C:/katago/katago.exe"
-              style={{ display: "block", padding: 4, width: 240 }}
-            />
-          </label>
-          <label style={{ fontSize: 13 }}>
-            启动参数
-            <input
-              type="text"
-              value={engineArgs}
-              onChange={(e) => setEngineArgs(e.target.value)}
-              disabled={engineRunning}
-              style={{ display: "block", padding: 4, width: 240 }}
-            />
-          </label>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {engineRunning ? (
             <button onClick={stopEngine}>停止引擎</button>
           ) : (
-            <button onClick={startEngine} disabled={!binaryPath}>
-              启动引擎
-            </button>
+            <button onClick={handleAutoStart}>一键启动 KataGo</button>
           )}
           <span style={{ fontSize: 12, color: engineRunning ? "#2a7d2a" : "#999" }}>
-            {engineRunning ? "✓ 引擎运行中" : "○ 引擎未启动"}
+            {engineRunning ? "✓ 分析引擎运行中" : "○ 引擎未启动"}
           </span>
         </div>
       </div>
@@ -108,6 +111,11 @@ export default function ReviewView() {
       {/* SGF 导入 */}
       <div style={{ border: "1px solid #eee", borderRadius: 6, padding: 12 }}>
         <h3 style={{ marginTop: 0 }}>导入 SGF 棋谱</h3>
+        {pendingReview && (
+          <p style={{ fontSize: 12, color: "#1890ff", margin: "0 0 8px" }}>
+            📂 来自对局库的对局已载入，引擎启动后可直接分析
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
           <input type="file" accept=".sgf" onChange={handleFile} />
           <span style={{ fontSize: 12, color: "#999" }}>或直接在下方粘贴 SGF</span>

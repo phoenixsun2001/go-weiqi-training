@@ -1,6 +1,50 @@
 use crate::error::{AppError, AppResult};
 use crate::game_state::Color;
 
+/// SGF 元数据
+pub struct SgfMetadata {
+    pub black_name: String,   // PB[xxx]
+    pub white_name: String,   // PW[xxx]
+    pub black_rank: String,   // BR[xxx]
+    pub white_rank: String,   // WR[xxx]
+    pub result: String,       // RE[xxx]
+    pub board_size: usize,    // SZ[xxx]
+    pub played_date: String,  // DT[xxx]
+    pub move_count: usize,
+}
+
+/// 从 SGF 中提取属性值：找 `KEY[...]` 返回括号内容（取第一个匹配）
+fn extract_property(sgf: &str, key: &str) -> String {
+    let pattern = format!("{key}[");
+    if let Some(start) = sgf.find(&pattern) {
+        let content_start = start + pattern.len();
+        if let Some(end) = sgf[content_start..].find(']') {
+            return sgf[content_start..content_start + end].to_string();
+        }
+    }
+    String::new()
+}
+
+/// 解析 SGF 元数据（双方名字/段位/结果/棋盘/日期/手数）
+pub fn parse_metadata(sgf: &str) -> SgfMetadata {
+    let board_size = extract_property(sgf, "SZ")
+        .parse::<usize>()
+        .unwrap_or(19);
+    let move_count = parse_moves(sgf)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    SgfMetadata {
+        black_name: extract_property(sgf, "PB"),
+        white_name: extract_property(sgf, "PW"),
+        black_rank: extract_property(sgf, "BR"),
+        white_rank: extract_property(sgf, "WR"),
+        result: extract_property(sgf, "RE"),
+        board_size,
+        played_date: extract_property(sgf, "DT"),
+        move_count,
+    }
+}
+
 /// 解析 SGF 中的着手序列。pass 用 (usize::MAX, usize::MAX) 表示。
 pub fn parse_moves(sgf: &str) -> AppResult<Vec<(Color, usize, usize)>> {
     let mut moves = vec![];
@@ -109,4 +153,29 @@ mod tests {
         let reparsed = parse_moves(&sgf).unwrap();
         assert_eq!(reparsed, moves);
     }
+
+    #[test]
+    fn parse_foxwq_metadata() {
+        let sgf = "(;GM[1]FF[4]SZ[19]PB[柯洁]BR[9d]PW[申真谞]WR[9d]RE[B+2.5]DT[2024-03-15];B[qd];W[dd])";
+        let m = parse_metadata(sgf);
+        assert_eq!(m.black_name, "柯洁");
+        assert_eq!(m.white_name, "申真谞");
+        assert_eq!(m.black_rank, "9d");
+        assert_eq!(m.white_rank, "9d");
+        assert_eq!(m.result, "B+2.5");
+        assert_eq!(m.board_size, 19);
+        assert_eq!(m.played_date, "2024-03-15");
+        assert_eq!(m.move_count, 2);
+    }
+
+    #[test]
+    fn parse_metadata_defaults_when_missing() {
+        let sgf = "(;GM[1]SZ[13];B[ee])";
+        let m = parse_metadata(sgf);
+        assert_eq!(m.black_name, "");
+        assert_eq!(m.board_size, 13);
+        assert_eq!(m.move_count, 1);
+        assert_eq!(m.result, "");
+    }
 }
+

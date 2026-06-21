@@ -6,6 +6,7 @@ import type {
   EngineStatus,
   GuessDto,
   GuessResult,
+  ImportedGameDto,
   PlayResult,
   ProblemDto,
   StartEngineArgs,
@@ -71,6 +72,17 @@ export const ipc = {
   installKatago: () => invoke<string>("install_katago"),
   autoStartEngine: (difficulty: number) => invoke<EngineStatus>("auto_start_engine", { difficulty }),
   autoStartAnalysisEngine: () => invoke<{ running: boolean }>("auto_start_analysis_engine"),
+
+  // 对局库（野狐导入）
+  importGame: (sgf: string, source?: string) =>
+    invoke<ImportedGameDto>("import_game", { args: { sgf, source: source ?? null } }),
+  listImportedGames: () => invoke<ImportedGameDto[]>("list_imported_games"),
+  getImportedGame: (id: number) => invoke<ImportedGameDto | null>("get_imported_game", { id }),
+  deleteImportedGame: (id: number) => invoke<void>("delete_imported_game", { id }),
+  updateGameMeta: (id: number, reviewed?: boolean, tags?: string, notes?: string) =>
+    invoke<ImportedGameDto>("update_game_meta", {
+      args: { id, reviewed: reviewed ?? null, tags: tags ?? null, notes: notes ?? null },
+    }),
 };
 
 type Color = import("../types").Color;

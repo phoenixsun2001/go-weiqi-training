@@ -93,3 +93,22 @@ export interface AnalysisReport {
   blunder_count: number;
   inaccuracy_count: number;
 }
+
+// 对局库（野狐导入）
+export interface ImportedGameDto {
+  id: number;
+  imported_at: string;
+  source: string;
+  black_name: string;
+  white_name: string;
+  black_rank: string;
+  white_rank: string;
+  result: string;
+  board_size: number;
+  played_date: string;
+  move_count: number;
+  sgf: string;
+  reviewed: boolean;
+  tags: string;
+  notes: string;
+}

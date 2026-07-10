@@ -55,7 +55,7 @@ export default function GameView() {
     try {
       const msg = await ipc.installKatago();
       setKatagoInstalled(true);
-      setInstallMsg(msg);
+      setInstallMsg(msg.message);
     } catch (e) {
       setInstallMsg(`安装失败：${e}`);
     } finally {

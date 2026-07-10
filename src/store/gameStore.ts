@@ -138,11 +138,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   startEngine: async (binaryPath, args) => {
     try {
-      const status = await ipc.startEngine({
-        binary_path: binaryPath,
-        args,
-        difficulty: get().engineStatus?.difficulty ?? 3,
-      });
+      const status = await ipc.startEngine(binaryPath, args, get().engineStatus?.difficulty ?? 3);
       set({ engineStatus: status, error: null, lastErrorKind: null });
     } catch (e) {
       setError(set, String(e), "engine");

@@ -1,79 +1,138 @@
 # 围棋棋力训练应用
 
-帮助业余 1 段以上棋手提升到业余 5 段或以上的桌面训练应用。
+帮助业余 1 段以上棋手提升到业余 5 段或以上的 Web 训练应用。
 
 ## 技术栈
 
-- **Tauri 2**（Rust 后端 + React/TS 前端）
-- **KataGo**（GTP 协议）作为 AI 引擎
-- **本地 SQLite** 存储档案 / 对局 / 评级历史
+- **后端**：Python FastAPI + SQLite + KataGo（GTP 协议）
+- **前端**：React 18 + TypeScript + Vite + Recharts
+- **AI 引擎**：KataGo（OpenCL 后端，适配 AMD/NVIDIA GPU）
 
 ## 架构
 
-- 双 KataGo 子进程角色（分析引擎 / 对手引擎，互不阻塞）
-- `game_state` 为单一事实源，前端只渲染不持有规则
-- Elo/Glicko 对战胜率跟踪驱动针对性训练
-- 完全离线优先
-
-详见 `docs/superpowers/specs/2026-06-20-go-training-app-design.md`。
-
-## 开发
-
-### 前端
-
-```bash
-npm install
-npm run dev      # 启动开发服务器（端口 1420）
-npm run build    # 类型检查 + 生产构建
+```
+浏览器 (React SPA)
+    ↕ HTTP REST + WebSocket
+Python FastAPI 后端 (localhost:8000)
+    ├── KataGo GTP 子进程（对战引擎 + 分析引擎）
+    ├── SQLite 数据库（档案/对局/题库/复盘/弱点）
+    └── 死活题库（420 道 SGF）
 ```
 
-### Rust 后端
+## 快速启动
 
-```bash
-cd src-tauri
-cargo test      # 运行单元测试
-cargo check     # 类型检查
-cargo build     # 构建
+### 前置条件
+
+- Python 3.10+
+- Node.js 18+
+- KataGo 二进制 + 网络权重（放在 `katago/` 目录）
+
+### 安装 KataGo（首次）
+
+将 KataGo 可执行文件和权重放在项目根目录的 `katago/` 下：
+```
+katago/
+├── katago.exe
+├── b18c384nbt-uec.bin.gz   (网络权重)
+└── default_gtp.cfg          (KataGo 自带配置)
 ```
 
-### 完整桌面应用（需 Rust + Node）
+下载地址：
+- 二进制：https://github.com/lightvector/KataGo/releases (OpenCL 版)
+- 权重：https://github.com/lightvector/KataGo/releases/download/v1.12.0/b18c384nbt-uec.bin.gz
+
+### 启动
 
 ```bash
-npm run tauri dev
+# 一键启动（Windows）
+start.bat
+
+# 或手动启动
+# 1. 构建前端
+npm install && npm run build
+
+# 2. 启动后端
+cd backend
+pip install -r requirements.txt
+python main.py
+
+# 3. 打开浏览器访问 http://127.0.0.1:8000
 ```
 
-## 已实现模块（MVP）
+### 开发模式（热重载前端）
 
-- ✅ 围棋规则核心（落子 / 提子 / 劫 / 自杀，含单元测试）
-- ✅ 坐标转换（GTP <-> 内部，跳过字母 I）
-- ✅ SGF 解析与导出
-- ✅ Elo 棋力评级与段位映射（1500=1d ... 1900=5d）
-- ✅ SQLite 本地存储（档案 / 对局 / 评级历史）
-- ✅ KataGo GTP 引擎管理器（进程管理 + 协议解析）
-- ✅ **可调难度对战（已接入 KataGo）**：选择执色、难度（业余1~5段）、启动引擎后 AI 自动应手；难度通过 `kata-set-param maxVisits` 实时调整
-- ✅ **AI 复盘分析（端到端）**：导入 SGF 棋谱 → 独立分析引擎逐手跑 KataGo → 真实胜率曲线 + 失误标记（Good/Inaccuracy/Blunder）→ 失误自动按阶段记入弱点表（驱动针对性题库出题）
-- ✅ 对战主界面（落子 / 虚手 / 新局 / AI 对手开关 / 难度选择 / 棋力显示）
-- ✅ **针对性题库训练（弱点驱动）**：按用户棋力（段位+1）出题，优先出弱点分类的题；含作答判定、解析、错题本、弱点统计面板
-- ✅ **猜棋训练**：看局面猜下一手，训练读盘与第一感，含揭晓解析与正确率
-- ✅ 复盘界面与胜率曲线组件
+```bash
+# 终端 1：启动后端
+cd backend && python main.py
 
-### 使用 AI 对手
+# 终端 2：启动 Vite 开发服务器
+npm run dev
+# 访问 http://localhost:5173
+```
 
-1. 在「对战」页勾选"启用 KataGo AI 对手"
-2. 填写本地 KataGo 可执行文件路径（如 `C:/katago/katago.exe`）与启动参数（如 `gtp -model model.bin`）
-3. 选择执色与难度（业余 1~5 段）
-4. 点击"启动引擎"，绿字提示"引擎运行中"即可开始对弈，AI 会自动应手
+## 功能模块
 
-## 待实现（后续阶段）
+### 可调难度对战
+- KataGo AI 对手，业余 1-5 段难度可调
+- maxVisits 控制棋力（1段=8 … 5段=800）
+- 形势判断（胜率/目数/领先）
 
-- 棋力面板（评级历史曲线）
-- KataGo 引擎首次下载向导（目前需手动指定路径）
-- 题库内容扩充（从外部 SGF 题库批量导入）
+### AI 复盘分析
+- 导入野狐/外部 SGF 棋谱
+- KataGo 逐手分析，WebSocket 流式推送
+- 胜率曲线 + 失误标记（Good/Inaccuracy/Blunder）
+- 复盘总结报告 + 结果持久化
+- 棋盘导航控件（前进/后退/自动播放）
+
+### 针对性题库训练
+- 420 道开源死活题（gogameguru，分 easy/intermediate/hard）
+- 弱点驱动出题（复盘失误自动累积弱点，优先出弱项题）
+- 棋盘点击作答 + 正解标记
+
+### 猜棋训练
+- 看局面猜下一手，训练读盘与第一感
+
+### 对局库
+- 导入野狐 SGF 棋谱（批量导入）
+- 自动解析双方名字/段位/结果/日期
+- 复盘历史列表 + 多维度检索
+- 标签与笔记管理
+
+### 棋力评估
+- Elo 评级系统（1500=1段 … 1900=5段）
+
+## 完整训练闭环
+
+```
+野狐实战 → 导入SGF → KataGo复盘 → 失误分析 → 弱点统计 → 针对性题库出题
+```
 
 ## 测试
 
 ```bash
-cd src-tauri && cargo test
+cd backend && python -m pytest tests/ -v
 ```
 
-后端单元测试覆盖：坐标转换、棋局规则（提子/劫/自杀）、SGF 解析导出、Elo 评级、SQLite 存储、GTP 协议解析、对手难度映射、复盘胜率提取与失误分类。
+## 项目结构
+
+```
+Go/
+├── backend/                # Python FastAPI 后端
+│   ├── main.py             # API 路由（36+ 端点 + WebSocket）
+│   ├── katago_engine.py    # KataGo 子进程管理
+│   ├── game_state.py       # 棋局规则
+│   ├── sgf_parser.py       # SGF 解析
+│   ├── store.py            # SQLite 存储
+│   ├── rating.py           # Elo 评级
+│   ├── coords.py           # 坐标转换
+│   ├── resources/tsumego/  # 420 道死活题 SGF
+│   └── tests/              # 单元测试
+├── src/                    # React 前端
+│   ├── lib/api.ts          # HTTP API 封装
+│   ├── components/Board.tsx# Canvas 棋盘
+│   ├── store/gameStore.ts  # Zustand 状态
+│   └── views/              # 对战/复盘/题库/猜棋/对局库
+├── katago/                 # KataGo 二进制+权重（不纳入 git）
+├── dist/                   # 前端构建产物
+└── start.bat               # 一键启动
+```

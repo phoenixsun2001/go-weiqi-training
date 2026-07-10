@@ -1,9 +1,9 @@
 /node_modules
 /dist
-/src-tauri/target
 *.log
 training.db
 .dev-port
 katago/
-src-tauri/katago/
-resources/tsumego/
+__pycache__/
+*.pyc
+backend/resources/tsumego/

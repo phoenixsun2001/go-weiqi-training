@@ -105,7 +105,6 @@ def find_katago_dir() -> Path:
     backend_dir = Path(__file__).parent
     project_dir = backend_dir.parent
     candidates.append(project_dir / "katago")
-    candidates.append(project_dir / "src-tauri" / "katago")
     candidates.append(backend_dir / "katago")
 
     # 从当前工作目录推断

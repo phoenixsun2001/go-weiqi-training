@@ -117,8 +117,8 @@ app.add_middleware(
 
 
 def seed_problems():
-    """从 resources/tsumego 导入死活题"""
-    base = Path(__file__).parent.parent / "src-tauri" / "resources" / "tsumego"
+    """从 backend/resources/tsumego 导入死活题"""
+    base = Path(__file__).parent / "resources" / "tsumego"
     if not base.exists():
         base = Path(__file__).parent.parent / "resources" / "tsumego"
     levels = [("easy", 2), ("intermediate", 4), ("hard", 6)]

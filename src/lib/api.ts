@@ -121,6 +121,17 @@ export const api = {
   // 棋力面板
   ratingHistory: () => get<{ recorded_at: string; elo: number }[]>("/api/rating/history"),
 
+  // 野狐棋谱导入
+  foxwqSearch: (nickname: string, limit: number = 20) =>
+    post<{
+      uid: string; nickname: string; dan: string;
+      total_win: number; total_lost: number;
+      games: { chessid: string; black_name: string; white_name: string; black_dan: string; white_dan: string; result: string; start_time: string; move_count: number }[];
+    }>("/api/foxwq/search", { nickname, limit }),
+
+  foxwqImport: (nickname: string, limit: number = 20) =>
+    post<{ imported: number; failed: number; message: string }>("/api/foxwq/import", { nickname, limit }),
+
   // WebSocket 流式复盘
   wsReviewUrl: () => `ws://127.0.0.1:8000/ws/review`,
 };

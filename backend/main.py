@@ -548,6 +548,96 @@ def update_meta(req: UpdateMetaReq):
     return store.get_imported_game(req.id)
 
 
+# ===== 野狐棋谱导入 =====
+from foxwq_download import query_user_by_name, fetch_chess_list, fetch_sgf, format_dan, parse_result
+
+
+class FoxwqSearchReq(BaseModel):
+    nickname: str
+    limit: int = 20
+
+
+@app.post("/api/foxwq/search")
+def foxwq_search(req: FoxwqSearchReq):
+    """通过野狐昵称查询用户和对局列表"""
+    try:
+        user_info = query_user_by_name(req.nickname)
+    except Exception as e:
+        raise HTTPException(400, f"查询用户失败: {e}")
+
+    uid = user_info["uid"]
+    try:
+        chess_list = fetch_chess_list(uid)
+    except Exception as e:
+        raise HTTPException(400, f"获取棋谱列表失败: {e}")
+
+    games = []
+    for game in chess_list[:req.limit]:
+        games.append({
+            "chessid": game.get("chessid", ""),
+            "black_name": game.get("blacknick", "?"),
+            "white_name": game.get("whitenick", "?"),
+            "black_dan": format_dan(game.get("blackdan", 0)),
+            "white_dan": format_dan(game.get("whitedan", 0)),
+            "result": parse_result(game.get("winner", 0), game.get("point", 0), game.get("reason", 0)),
+            "start_time": game.get("starttime", ""),
+            "move_count": game.get("movenum", 0),
+        })
+
+    return {
+        "uid": uid,
+        "nickname": user_info["nickname"],
+        "dan": format_dan(user_info["dan"]),
+        "total_win": user_info["total_win"],
+        "total_lost": user_info["total_lost"],
+        "games": games,
+    }
+
+
+class FoxwqImportReq(BaseModel):
+    nickname: str
+    limit: int = 20
+
+
+@app.post("/api/foxwq/import")
+def foxwq_import(req: FoxwqImportReq):
+    """通过野狐昵称批量下载棋谱并导入对局库"""
+    try:
+        user_info = query_user_by_name(req.nickname)
+    except Exception as e:
+        raise HTTPException(400, f"查询用户失败: {e}")
+
+    uid = user_info["uid"]
+    try:
+        chess_list = fetch_chess_list(uid)
+    except Exception as e:
+        raise HTTPException(400, f"获取棋谱列表失败: {e}")
+
+    imported = 0
+    failed = 0
+    for game in chess_list[:req.limit]:
+        chessid = game.get("chessid", "")
+        if not chessid:
+            continue
+        try:
+            sgf_content = fetch_sgf(chessid)
+            if not sgf_content or len(sgf_content) < 20:
+                failed += 1
+                continue
+            meta = parse_metadata(sgf_content)
+            if meta["move_count"] == 0:
+                failed += 1
+                continue
+            store.import_game("foxwq", meta, sgf_content)
+            imported += 1
+            import time as _time
+            _time.sleep(0.2)  # 避免请求过快
+        except Exception:
+            failed += 1
+
+    return {"imported": imported, "failed": failed, "message": f"导入完成：成功 {imported} 局，失败 {failed} 局"}
+
+
 # ===== 棋力面板 =====
 @app.get("/api/rating/history")
 def rating_history():

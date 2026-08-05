@@ -96,7 +96,8 @@ export const api = {
   // AI 智能复盘（不依赖 KataGo）
   aiReview: (sgf: string, gameId?: number) =>
     post<{
-      black: string; white: string; result: string; total_moves: number;
+      black: string; white: string; black_rank: string; white_rank: string;
+      result: string; total_moves: number; board_size: number; date: string;
       phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
       key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
       summary: string;

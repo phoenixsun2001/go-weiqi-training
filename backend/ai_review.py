@@ -62,11 +62,22 @@ def review_game(sgf: str) -> dict:
     # ===== 形势估算（基于选点分析） =====
     territory_est = _estimate_territory(moves, size, total)
 
+    br = re.search(r'BR\[([^\]]*)\]', sgf)
+    wr = re.search(r'WR\[([^\]]*)\]', sgf)
+    black_rank = br.group(1) if br else ""
+    white_rank = wr.group(1) if wr else ""
+    dt_match = re.search(r'DT\[([^\]]*)\]', sgf)
+    date = (dt_match.group(1) if dt_match else "")[:10]
+
     return {
         "black": black,
         "white": white,
+        "black_rank": black_rank,
+        "white_rank": white_rank,
         "result": result,
         "total_moves": total,
+        "board_size": size,
+        "date": date,
         "meta": meta,
         "phases": phases,
         "key_moves": key_moves,

@@ -5,7 +5,10 @@ import { ipc } from "../lib/ipc";
 import type { AnalysisReport, BoardSnapshot, MoveAnalysisDto, ReviewResultDto } from "../types";
 
 interface AiReviewResult {
-  black: string; white: string; result: string; total_moves: number;
+  black: string; white: string;
+  black_rank: string; white_rank: string;
+  result: string; total_moves: number;
+  board_size: number; date: string;
   phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
   key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
   summary: string;
@@ -200,11 +203,39 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
             {/* AI 智能复盘结果 */}
             {aiReview && (
               <div style={{ marginBottom: 12 }}>
-                {/* 总结 */}
-                <div style={{ padding: 10, background: "#f0f5ff", borderRadius: 6, border: "1px solid #adc6ff", marginBottom: 8 }}>
-                  <strong>📋 {aiReview.black} vs {aiReview.white}</strong>
-                  <span style={{ marginLeft: 8, fontSize: 13 }}>{aiReview.result} · {aiReview.total_moves}手</span>
-                  <p style={{ margin: "6px 0 0", fontSize: 13, lineHeight: 1.6 }}>{aiReview.summary}</p>
+                {/* 对战信息卡片 */}
+                <div style={{ padding: 12, background: "#f0f5ff", borderRadius: 6, border: "1px solid #adc6ff", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginBottom: 8 }}>
+                    {/* 黑方 */}
+                    <div style={{ textAlign: "center", minWidth: 100 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#111", margin: "0 auto 4px" }} />
+                      <div style={{ fontWeight: "bold", fontSize: 14 }}>{aiReview.black || "黑方"}</div>
+                      {aiReview.black_rank && <div style={{ fontSize: 12, color: "#666" }}>{aiReview.black_rank}</div>}
+                    </div>
+                    {/* VS + 结果 */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 18, fontWeight: "bold", color: resultColor(aiReview.result) }}>
+                        {resultLabel(aiReview.result)}
+                      </div>
+                      {aiReview.result && <div style={{ fontSize: 12, color: "#999" }}>{aiReview.result}</div>}
+                    </div>
+                    {/* 白方 */}
+                    <div style={{ textAlign: "center", minWidth: 100 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#fff", border: "2px solid #333", margin: "0 auto 4px" }} />
+                      <div style={{ fontWeight: "bold", fontSize: 14 }}>{aiReview.white || "白方"}</div>
+                      {aiReview.white_rank && <div style={{ fontSize: 12, color: "#666" }}>{aiReview.white_rank}</div>}
+                    </div>
+                  </div>
+                  {/* 补充信息 */}
+                  <div style={{ display: "flex", justifyContent: "center", gap: 20, fontSize: 12, color: "#888", borderTop: "1px solid #d6e4ff", paddingTop: 6 }}>
+                    <span>📅 {aiReview.date || "日期未知"}</span>
+                    <span>♟ {aiReview.total_moves}手</span>
+                    <span>📊 {aiReview.board_size}路</span>
+                  </div>
+                  {/* 总结评语 */}
+                  <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.6, color: "#333", background: "#fff", padding: 8, borderRadius: 4 }}>
+                    {aiReview.summary}
+                  </p>
                 </div>
 
                 {/* 形势判断 */}
@@ -332,4 +363,16 @@ function kindLabel(k: MoveAnalysisDto["kind"]): string {
 }
 function kindColor(k: MoveAnalysisDto["kind"], a: number): string {
   return k === "blunder" ? `rgba(207,19,34,${a})` : k === "inaccuracy" ? `rgba(212,160,23,${a})` : `rgba(56,158,13,${a})`;
+}
+
+function resultLabel(result: string): string {
+  if (!result) return "—";
+  if (result.startsWith("B+")) return "黑胜";
+  if (result.startsWith("W+")) return "白胜";
+  return result;
+}
+function resultColor(result: string): string {
+  if (result.startsWith("B+")) return "#111";
+  if (result.startsWith("W+")) return "#666";
+  return "#999";
 }

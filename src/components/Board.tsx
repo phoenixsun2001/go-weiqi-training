@@ -10,6 +10,8 @@ interface Props {
   marks?: { x: number; y: number; label: string; color?: string }[];
   /** 最新一手棋的坐标，在棋子下方画红色三角标记 */
   lastMove?: { x: number; y: number } | null;
+  /** 每颗棋子上显示的手数（数字），key = "x,y" */
+  moveNumbers?: Record<string, number>;
 }
 
 export default function Board({
@@ -20,6 +22,7 @@ export default function Board({
   showCoords = true,
   marks = [],
   lastMove = null,
+  moveNumbers,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 当前尺寸档位索引
@@ -111,6 +114,17 @@ export default function Board({
           ctx.strokeStyle = "#000";
           ctx.lineWidth = 1;
           ctx.stroke();
+          // 手数显示
+          if (moveNumbers) {
+            const num = moveNumbers[`${x},${y}`];
+            if (num !== undefined) {
+              ctx.font = `bold ${cell * 0.32}px sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillStyle = s === "black" ? "#fff" : "#111";
+              ctx.fillText(String(num), cx, cy);
+            }
+          }
         }
       }
     }
@@ -141,7 +155,7 @@ export default function Board({
       ctx.fillStyle = m.color ?? "#e22";
       ctx.fillText(m.label, cx, cy);
     }
-  }, [snapshot, renderSize, showCoords, marks, lastMove]);
+  }, [snapshot, renderSize, showCoords, marks, lastMove, moveNumbers]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive || !onPlay) return;

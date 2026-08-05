@@ -93,6 +93,16 @@ export const api = {
     post<AnalysisReport>("/api/review/analyze", { sgf, threshold: threshold ?? null, game_id: gameId ?? null }),
   getReviewResult: (gameId: number) => get<ReviewResultDto | null>(`/api/review/result/${gameId}`),
 
+  // AI 智能复盘（不依赖 KataGo）
+  aiReview: (sgf: string, gameId?: number) =>
+    post<{
+      black: string; white: string; result: string; total_moves: number;
+      phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
+      key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
+      summary: string;
+      territory_estimate: { black_territory_est: number; white_territory_est: number; assessment: string; black_third_line: number; white_third_line: number; black_center: number; white_center: number };
+    }>("/api/review/ai", { sgf, game_id: gameId ?? null }),
+
   // 题库
   importTsumego: () => post<{ message: string }>("/api/problems/import-tsumego"),
   nextProblem: (maxDifficulty?: number) =>

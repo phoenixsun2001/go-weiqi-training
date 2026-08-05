@@ -599,6 +599,25 @@ class FoxwqImportReq(BaseModel):
     limit: int = 20
 
 
+# ===== AI 智能复盘（不依赖 KataGo）=====
+from ai_review import review_game
+
+
+class AiReviewReq(BaseModel):
+    sgf: str
+    game_id: int | None = None
+
+
+@app.post("/api/review/ai")
+def ai_review(req: AiReviewReq):
+    """AI 智能复盘：基于棋型分析，不依赖 KataGo"""
+    try:
+        result = review_game(req.sgf)
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"复盘失败: {e}")
+
+
 @app.post("/api/foxwq/import")
 def foxwq_import(req: FoxwqImportReq):
     """通过野狐昵称批量下载棋谱并导入对局库"""

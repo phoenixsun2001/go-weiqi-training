@@ -14,6 +14,8 @@ export default function LibraryView({ onReviewGame }: Props) {
   const [tagsDraft, setTagsDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
   const [filter] = useState("");
+  const [sortKey, setSortKey] = useState<"played_date" | "move_count" | "black_name" | "white_name" | "result" | "reviewed">("played_date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // 野狐导入面板状态
   const [showImportPanel, setShowImportPanel] = useState(false);
@@ -103,6 +105,30 @@ export default function LibraryView({ onReviewGame }: Props) {
   const filtered = filter
     ? games.filter((g) => g.black_name.includes(filter) || g.white_name.includes(filter) || g.tags.includes(filter))
     : games;
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const sortArrow = (key: typeof sortKey) => {
+    if (sortKey !== key) return "";
+    return sortDir === "asc" ? " ↑" : " ↓";
+  };
+
+  const sorted = [...filtered].sort((a, b) => {
+    let av: string | number | boolean = a[sortKey];
+    let bv: string | number | boolean = b[sortKey];
+    if (typeof av === "boolean") av = av ? 1 : 0;
+    if (typeof bv === "boolean") bv = bv ? 1 : 0;
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
   const reviewedCount = games.filter((g) => g.reviewed).length;
 
   return (
@@ -158,12 +184,24 @@ export default function LibraryView({ onReviewGame }: Props) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
             <tr style={{ borderBottom: "2px solid #ddd", textAlign: "left" }}>
-              <th style={{ padding: 6 }}>状态</th>
-              <th style={{ padding: 6 }}>日期</th>
-              <th style={{ padding: 6 }}>黑方</th>
-              <th style={{ padding: 6 }}>白方</th>
-              <th style={{ padding: 6 }}>结果</th>
-              <th style={{ padding: 6 }}>手数</th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("reviewed")}>
+                状态{sortArrow("reviewed")}
+              </th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("played_date")}>
+                日期{sortArrow("played_date")}
+              </th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("black_name")}>
+                黑方{sortArrow("black_name")}
+              </th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("white_name")}>
+                白方{sortArrow("white_name")}
+              </th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("result")}>
+                结果{sortArrow("result")}
+              </th>
+              <th style={{ padding: 6, cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort("move_count")}>
+                手数{sortArrow("move_count")}
+              </th>
               <th style={{ padding: 6 }}>来源</th>
               <th style={{ padding: 6 }}>操作</th>
             </tr>
@@ -173,7 +211,7 @@ export default function LibraryView({ onReviewGame }: Props) {
               <tr><td colSpan={8} style={{ padding: 16, color: "#999", textAlign: "center" }}>
                 暂无对局。点击"野狐导入"通过昵称批量导入。
               </td></tr>
-            ) : filtered.map((g) => (
+            ) : sorted.map((g) => (
               <tr key={g.id} style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
                 onClick={() => setSelected(g)}
                 onMouseEnter={(e) => e.currentTarget.style.background = "#f6f8fa"}

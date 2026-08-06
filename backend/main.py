@@ -595,49 +595,144 @@ def foxwq_search(req: FoxwqSearchReq):
 
 
 class FoxwqImportReq(BaseModel):
-    nickname: str
-    limit: int = 20
+    nickname: str | None = None
+    uid: str | None = None
+    limit: int = 50
+    date_from: str | None = None   # "2026-05-01"
+    date_to: str | None = None     # "2026-08-05"
 
 
-# ===== AI 智能复盘（不依赖 KataGo）=====
-from ai_review import review_game
+@app.post("/api/foxwq/search")
+def foxwq_search(req: FoxwqImportReq):
+    """通过野狐昵称/UID查询用户和对局列表"""
+    # 支持 UID 直接查询
+    if req.uid:
+        uid = req.uid
+        nickname = req.uid
+    else:
+        if not req.nickname:
+            raise HTTPException(400, "请提供昵称或UID")
+        try:
+            user_info = query_user_by_name(req.nickname)
+        except Exception as e:
+            raise HTTPException(400, f"查询用户失败: {e}")
+        uid = user_info["uid"]
 
-
-class AiReviewReq(BaseModel):
-    sgf: str
-    game_id: int | None = None
-
-
-@app.post("/api/review/ai")
-def ai_review(req: AiReviewReq):
-    """AI 智能复盘：基于棋型分析，不依赖 KataGo"""
     try:
-        result = review_game(req.sgf)
-        return result
+        # 翻页获取更多历史对局
+        all_chess = []
+        lastcode = "0"
+        for _ in range(10):  # 最多翻10页
+            chess_list = fetch_chess_list(uid) if lastcode == "0" else _fetch_chess_list_paged(uid, lastcode)
+            if not chess_list:
+                break
+            all_chess.extend(chess_list)
+            lastcode = chess_list[-1].get("chessid", "")
+            if len(all_chess) >= req.limit * 2:
+                break
+
+        # 日期过滤
+        filtered = []
+        for game in all_chess:
+            dt = game.get("starttime", "")[:10]
+            if req.date_from and dt < req.date_from:
+                continue
+            if req.date_to and dt > req.date_to:
+                continue
+            filtered.append(game)
+
+        games = []
+        for game in filtered[:req.limit]:
+            games.append({
+                "chessid": game.get("chessid", ""),
+                "black_name": game.get("blacknick", "?"),
+                "white_name": game.get("whitenick", "?"),
+                "black_dan": format_dan(game.get("blackdan", 0)),
+                "white_dan": format_dan(game.get("whitedan", 0)),
+                "result": parse_result(game.get("winner", 0), game.get("point", 0), game.get("reason", 0)),
+                "start_time": game.get("starttime", ""),
+                "move_count": game.get("movenum", 0),
+            })
+
+        return {
+            "uid": uid,
+            "nickname": req.nickname or uid,
+            "games": games,
+            "total_found": len(all_chess),
+            "total_filtered": len(filtered),
+        }
     except Exception as e:
-        raise HTTPException(400, f"复盘失败: {e}")
+        raise HTTPException(400, f"获取棋谱列表失败: {e}")
+
+
+def _fetch_chess_list_paged(uid: str, lastcode: str):
+    """带分页参数获取棋谱列表"""
+    import urllib.request, urllib.parse, json
+    encoded_uid = urllib.parse.quote(uid)
+    url = f"https://h5.foxwq.com/yehuDiamond/chessbook_local/YHWQFetchChessList?srcuid=0&dstuid={encoded_uid}&type=1&lastcode={lastcode}&searchkey=&uin={encoded_uid}"
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if data.get("result") != 0:
+        return []
+    return data.get("chesslist", [])
 
 
 @app.post("/api/foxwq/import")
 def foxwq_import(req: FoxwqImportReq):
-    """通过野狐昵称批量下载棋谱并导入对局库"""
-    try:
-        user_info = query_user_by_name(req.nickname)
-    except Exception as e:
-        raise HTTPException(400, f"查询用户失败: {e}")
+    """通过野狐昵称/UID批量导入棋谱（增量去重 + 时间段过滤）"""
+    import time as _time
 
-    uid = user_info["uid"]
+    # 获取 UID
+    if req.uid:
+        uid = req.uid
+    else:
+        if not req.nickname:
+            raise HTTPException(400, "请提供昵称或UID")
+        try:
+            user_info = query_user_by_name(req.nickname)
+        except Exception as e:
+            raise HTTPException(400, f"查询用户失败: {e}")
+        uid = user_info["uid"]
+
+    # 翻页获取棋谱列表
     try:
-        chess_list = fetch_chess_list(uid)
+        all_chess = []
+        lastcode = "0"
+        for _ in range(10):
+            chess_list = fetch_chess_list(uid) if lastcode == "0" else _fetch_chess_list_paged(uid, lastcode)
+            if not chess_list:
+                break
+            all_chess.extend(chess_list)
+            lastcode = chess_list[-1].get("chessid", "")
+            if len(all_chess) >= req.limit * 2:
+                break
     except Exception as e:
         raise HTTPException(400, f"获取棋谱列表失败: {e}")
 
+    # 日期过滤 + 增量去重 + 下载导入
     imported = 0
+    skipped = 0
     failed = 0
-    for game in chess_list[:req.limit]:
+    for game in all_chess:
         chessid = game.get("chessid", "")
         if not chessid:
             continue
+
+        # 日期过滤
+        dt = game.get("starttime", "")[:10]
+        if req.date_from and dt < req.date_from:
+            continue
+        if req.date_to and dt > req.date_to:
+            continue
+
+        # 增量去重
+        if store.has_chess_id(chessid):
+            skipped += 1
+            continue
+
+        # 下载 SGF
         try:
             sgf_content = fetch_sgf(chessid)
             if not sgf_content or len(sgf_content) < 20:
@@ -647,14 +742,21 @@ def foxwq_import(req: FoxwqImportReq):
             if meta["move_count"] == 0:
                 failed += 1
                 continue
-            store.import_game("foxwq", meta, sgf_content)
+            store.import_game("foxwq", meta, sgf_content, chess_id=chessid)
             imported += 1
-            import time as _time
-            _time.sleep(0.2)  # 避免请求过快
+            _time.sleep(0.15)
         except Exception:
             failed += 1
 
-    return {"imported": imported, "failed": failed, "message": f"导入完成：成功 {imported} 局，失败 {failed} 局"}
+        if imported >= req.limit:
+            break
+
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "message": f"导入完成：新增 {imported} 局，跳过已存在 {skipped} 局，失败 {failed} 局"
+    }
 
 
 # ===== 棋力面板 =====

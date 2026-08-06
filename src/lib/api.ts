@@ -134,15 +134,27 @@ export const api = {
   ratingHistory: () => get<{ recorded_at: string; elo: number }[]>("/api/rating/history"),
 
   // 野狐棋谱导入
-  foxwqSearch: (nickname: string, limit: number = 20) =>
+  foxwqSearch: (params: { nickname?: string; uid?: string; limit?: number; date_from?: string; date_to?: string }) =>
     post<{
-      uid: string; nickname: string; dan: string;
-      total_win: number; total_lost: number;
+      uid: string; nickname: string;
       games: { chessid: string; black_name: string; white_name: string; black_dan: string; white_dan: string; result: string; start_time: string; move_count: number }[];
-    }>("/api/foxwq/search", { nickname, limit }),
+      total_found: number; total_filtered: number;
+    }>("/api/foxwq/search", {
+      nickname: params.nickname ?? null,
+      uid: params.uid ?? null,
+      limit: params.limit ?? 50,
+      date_from: params.date_from ?? null,
+      date_to: params.date_to ?? null,
+    }),
 
-  foxwqImport: (nickname: string, limit: number = 20) =>
-    post<{ imported: number; failed: number; message: string }>("/api/foxwq/import", { nickname, limit }),
+  foxwqImport: (params: { nickname?: string; uid?: string; limit?: number; date_from?: string; date_to?: string }) =>
+    post<{ imported: number; skipped: number; failed: number; message: string }>("/api/foxwq/import", {
+      nickname: params.nickname ?? null,
+      uid: params.uid ?? null,
+      limit: params.limit ?? 50,
+      date_from: params.date_from ?? null,
+      date_to: params.date_to ?? null,
+    }),
 
   // WebSocket 流式复盘
   wsReviewUrl: () => `ws://127.0.0.1:8000/ws/review`,

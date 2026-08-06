@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS imported_game (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     imported_at TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'foxwq',
+    chess_id TEXT NOT NULL DEFAULT '',
     black_name TEXT NOT NULL DEFAULT '',
     white_name TEXT NOT NULL DEFAULT '',
     black_rank TEXT NOT NULL DEFAULT '',
@@ -94,8 +95,24 @@ class Store:
     def __init__(self, db_path: str):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # 先迁移旧表（在执行新schema之前）
+        self._migrate()
         self.conn.executescript(SCHEMA)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_imported_game_chess_id ON imported_game(chess_id)")
+        self.conn.commit()
         self._bootstrap()
+
+    def _migrate(self):
+        """增量迁移：为旧数据库添加缺失的列（在 executescript 之前运行）"""
+        # 检查 imported_game 表是否存在
+        table_exists = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='imported_game'"
+        ).fetchone()
+        if table_exists:
+            cols = [r[1] for r in self.conn.execute("PRAGMA table_info(imported_game)").fetchall()]
+            if "chess_id" not in cols:
+                self.conn.execute("ALTER TABLE imported_game ADD COLUMN chess_id TEXT NOT NULL DEFAULT ''")
+                self.conn.commit()
 
     def _bootstrap(self):
         """首次启动创建默认档案"""
@@ -203,12 +220,21 @@ class Store:
         return [dict(r) for r in rows]
 
     # ===== Imported Game Library =====
-    def import_game(self, source: str, meta: dict, sgf: str) -> int:
+    def has_chess_id(self, chess_id: str) -> bool:
+        """检查某 chess_id 是否已存在（增量去重）"""
+        if not chess_id:
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM imported_game WHERE chess_id=? LIMIT 1", (chess_id,)
+        ).fetchone()
+        return row is not None
+
+    def import_game(self, source: str, meta: dict, sgf: str, chess_id: str = "") -> int:
         cur = self.conn.execute(
-            "INSERT INTO imported_game(imported_at,source,black_name,white_name,black_rank,white_rank,"
+            "INSERT INTO imported_game(imported_at,source,chess_id,black_name,white_name,black_rank,white_rank,"
             "result,board_size,played_date,move_count,sgf,reviewed,tags,notes) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,0,'','')",
-            (_now(), source, meta["black_name"], meta["white_name"], meta["black_rank"],
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,'','')",
+            (_now(), source, chess_id, meta["black_name"], meta["white_name"], meta["black_rank"],
              meta["white_rank"], meta["result"], meta["board_size"], meta["played_date"],
              meta["move_count"], sgf),
         )

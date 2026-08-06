@@ -3,12 +3,11 @@ import GameView from "./views/GameView";
 import ReviewView from "./views/ReviewView";
 import ReviewHistoryView from "./views/ReviewHistoryView";
 import ProblemView from "./views/ProblemView";
-import GuessView from "./views/GuessView";
+import JosekiView from "./views/JosekiView";
 import LibraryView from "./views/LibraryView";
 
-type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "guess";
+type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "joseki";
 
-/** 从对局库传入复盘页的待分析对局 */
 interface PendingReview {
   gameId: number;
   sgf: string;
@@ -47,8 +46,8 @@ export default function App() {
           <button onClick={() => setTab("problem")} style={tabBtn(tab === "problem")}>
             题库
           </button>
-          <button onClick={() => setTab("guess")} style={tabBtn(tab === "guess")}>
-            猜棋
+          <button onClick={() => setTab("joseki")} style={tabBtn(tab === "joseki")}>
+            定式
           </button>
         </nav>
       </header>
@@ -68,7 +67,7 @@ export default function App() {
       ) : tab === "problem" ? (
         <ProblemView />
       ) : (
-        <GuessView />
+        <JosekiView />
       )}
     </div>
   );

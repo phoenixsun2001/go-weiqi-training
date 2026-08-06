@@ -130,6 +130,12 @@ export const api = {
   updateGameMeta: (id: number, reviewed?: boolean, tags?: string, notes?: string) =>
     put<ImportedGameDto>("/api/library/meta", { id, reviewed: reviewed ?? null, tags: tags ?? null, notes: notes ?? null }),
 
+  // 定式学习
+  getJoseki: (params?: Record<string, string>) => {
+    const query = params ? "?" + Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&") : "";
+    return get<{ joseki: any[]; categories: string[] }>(`/api/joseki/list${query}`);
+  },
+
   // 棋力面板
   ratingHistory: () => get<{ recorded_at: string; elo: number }[]>("/api/rating/history"),
 

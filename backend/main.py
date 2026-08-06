@@ -779,6 +779,19 @@ def foxwq_import(req: FoxwqImportReq):
     }
 
 
+# ===== 定式学习 =====
+from joseki_data import get_all_joseki, get_categories
+
+
+@app.get("/api/joseki/list")
+def joseki_list(category: str | None = None):
+    """获取定式列表，可按分类筛选"""
+    all_joseki = get_all_joseki()
+    if category:
+        all_joseki = [j for j in all_joseki if j["category"] == category]
+    return {"joseki": all_joseki, "categories": get_categories()}
+
+
 # ===== 棋力面板 =====
 @app.get("/api/rating/history")
 def rating_history():

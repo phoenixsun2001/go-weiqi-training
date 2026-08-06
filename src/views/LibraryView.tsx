@@ -130,12 +130,22 @@ export default function LibraryView({ onReviewGame }: Props) {
     return 0;
   });
   const reviewedCount = games.filter((g) => g.reviewed).length;
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadGames();
+    setRefreshing(false);
+  };
 
   return (
     <div style={{ padding: 16, height: "calc(100vh - 50px)", display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>对局库（{games.length}局 · 已复盘{reviewedCount}）</h2>
         <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={handleRefresh} disabled={refreshing} style={{ padding: "4px 12px" }}>
+            {refreshing ? "🔄…" : "🔄 刷新"}
+          </button>
           <button onClick={() => setShowImportPanel(!showImportPanel)} style={{ padding: "4px 12px" }}>
             {showImportPanel ? "收起导入" : "📥 野狐导入"}
           </button>

@@ -98,6 +98,7 @@ export const api = {
     post<{
       black: string; white: string; black_rank: string; white_rank: string;
       result: string; total_moves: number; board_size: number; date: string;
+      reviewee: string; reviewee_color: string; reviewee_won: boolean;
       phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
       key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
       summary: string;

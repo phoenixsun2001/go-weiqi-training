@@ -25,39 +25,44 @@ def review_game(sgf: str) -> dict:
     white = pw.group(1) if pw else "?"
     result = re_match.group(1) if re_match else ""
 
-    is_black_jaden = True  # 假设分析黑方视角
+    # 自动检测复盘对象：优先 JadenSai，否则默认黑方
+    reviewee = "JadenSai"
+    is_black_reviewee = reviewee in black
+    reviewee_name = black if is_black_reviewee else white
+    opp_name = white if is_black_reviewee else black
+    reviewee_color = "black" if is_black_reviewee else "white"
+
+    # 判定复盘对象胜负
+    reviewee_won = (result.startswith("B+") and is_black_reviewee) or (result.startswith("W+") and not is_black_reviewee)
 
     # ===== 逐阶段分析 =====
     phases = []
 
     # 布局阶段（前15%手数）
     opening_end = max(15, int(total * 0.15))
-    opening_moves = moves[:opening_end]
-    opening_review = _review_opening(opening_moves, size, sgf)
+    # moves 已经是 (color_str, x, y) 格式
+    opening_review = _review_opening(moves[:opening_end], size, sgf, reviewee_color, reviewee_name)
     phases.append({"phase": "布局", "range": f"第1-{opening_end}手", **opening_review})
 
     # 序盘过渡（15%-30%）
     transition_end = max(opening_end + 5, int(total * 0.30))
-    transition_moves = moves[opening_end:transition_end]
-    transition_review = _review_transition(transition_moves, size, opening_end)
+    transition_review = _review_transition(moves[opening_end:transition_end], size, opening_end, reviewee_color, reviewee_name)
     phases.append({"phase": "序盘", "range": f"第{opening_end+1}-{transition_end}手", **transition_review})
 
     # 中盘（30%-70%）
     midgame_end = max(transition_end + 10, int(total * 0.70))
-    midgame_moves = moves[transition_end:midgame_end]
-    midgame_review = _review_midgame(midgame_moves, size, transition_end)
+    midgame_review = _review_midgame(moves[transition_end:midgame_end], size, transition_end, reviewee_color, reviewee_name)
     phases.append({"phase": "中盘", "range": f"第{transition_end+1}-{midgame_end}手", **midgame_review})
 
     # 官子（70%-100%）
-    endgame_moves = moves[midgame_end:]
-    endgame_review = _review_endgame(endgame_moves, size, midgame_end, result)
+    endgame_review = _review_endgame(moves[midgame_end:], size, midgame_end, result, reviewee_name, reviewee_won)
     phases.append({"phase": "官子", "range": f"第{midgame_end+1}-{total}手", **endgame_review})
 
-    # ===== 关键手分析 =====
-    key_moves = _find_key_moves(moves, size, total)
+    # ===== 关键手分析（只看复盘对象的棋）=====
+    key_moves = _find_key_moves(moves, size, total, reviewee_color)
 
     # ===== 总结 =====
-    summary = _build_summary(phases, result, total, meta)
+    summary = _build_summary(phases, result, total, meta, reviewee_name, reviewee_won, is_black_reviewee)
 
     # ===== 形势估算（基于选点分析） =====
     territory_est = _estimate_territory(moves, size, total)
@@ -78,7 +83,9 @@ def review_game(sgf: str) -> dict:
         "total_moves": total,
         "board_size": size,
         "date": date,
-        "meta": meta,
+        "reviewee": reviewee_name,
+        "reviewee_color": "黑" if is_black_reviewee else "白",
+        "reviewee_won": reviewee_won,
         "phases": phases,
         "key_moves": key_moves,
         "summary": summary,
@@ -117,53 +124,49 @@ def _classify_point(x, y, size):
     return "中腹"
 
 
-def _review_opening(moves, size, sgf):
-    """分析布局阶段"""
+def _review_opening(moves, size, sgf, reviewee_color="black", reviewee_name="棋手"):
+    """分析布局阶段（从复盘对象视角）"""
     comments = []
-    score = 5  # 满分5分
+    score = 5
     issues = []
 
-    # 1. 角部占领情况
-    corner_moves = []
-    for color, x, y in moves:
-        pt = _classify_point(x, y, size)
-        if pt in ["星位", "三三", "小目", "高目", "目外"]:
-            corner_moves.append((color, x, y, pt))
+    # 复盘对象的布局选点
+    reviewee_moves = [(x, y) for c, x, y in moves if c == reviewee_color]
 
-    # 2. 第一手评估
-    if moves:
-        _, fx, fy = moves[0]
+    # 1. 第一手评估（复盘对象的第一手）
+    if reviewee_moves:
+        fx, fy = reviewee_moves[0]
         first_pt = _classify_point(fx, fy, size)
         ed = _edge_dist(fx, fy, size)
         if ed <= 1:
-            comments.append(f"第1手下在{_gtp(fx,fy,size)}（{first_pt}），这是二线低位，效率很低。标准开局应选星位(Q16/D4)或小目。")
+            comments.append(f"{reviewee_name}第1手下在{_gtp(fx,fy,size)}（{first_pt}），二线低位效率很低。标准开局应选星位(Q16/D4)或小目。")
             score -= 2
             issues.append("开局选点低效")
         elif first_pt in ["星位", "小目", "三三"]:
-            comments.append(f"第1手{_gtp(fx,fy,size)}（{first_pt}），选点合理。")
+            comments.append(f"{reviewee_name}第1手{_gtp(fx,fy,size)}（{first_pt}），选点合理。")
         elif first_pt in ["高目", "目外"]:
-            comments.append(f"第1手{_gtp(fx,fy,size)}（{first_pt}），可接受但不如星位/小目常见。")
+            comments.append(f"{reviewee_name}第1手{_gtp(fx,fy,size)}（{first_pt}），可接受但不如星位/小目常见。")
             score -= 1
         else:
-            comments.append(f"第1手{_gtp(fx,fy,size)}不在标准角部位置。")
+            comments.append(f"{reviewee_name}第1手{_gtp(fx,fy,size)}不在标准角部位置。")
             score -= 1
             issues.append("开局不在角部")
 
-    # 3. 前8手角部占领
-    early_corners = sum(1 for _, x, y in moves[:8] if _classify_point(x, y, size) in ["星位","三三","小目","高目","目外"])
-    if early_corners < 3:
-        comments.append(f"前8手仅{early_corners}手在标准角部位置，角部占领不足。理想情况下前8手双方应占满4角。")
+    # 2. 复盘对象前4手角部占领
+    r_corners = sum(1 for x, y in reviewee_moves[:4] if _classify_point(x, y, size) in ["星位","三三","小目","高目","目外"])
+    if r_corners < 2 and len(reviewee_moves) >= 2:
+        comments.append(f"{reviewee_name}前4手仅{r_corners}手在标准角部位置，角部占领不足。")
         score -= 1
         issues.append("角部占领不足")
 
-    # 4. 二线棋检查
-    second_line = sum(1 for _, x, y in moves[:12] if _edge_dist(x, y, size) <= 1)
-    if second_line >= 3:
-        comments.append(f"前12手有{second_line}手在二线/一线，棋子效率过低。二线棋发展空间小，容易被压制。")
+    # 3. 复盘对象二线棋检查
+    r_second = sum(1 for x, y in reviewee_moves[:8] if _edge_dist(x, y, size) <= 1)
+    if r_second >= 2:
+        comments.append(f"{reviewee_name}布局阶段有{r_second}手在二线/一线，棋子效率过低。")
         score -= 1
         issues.append("二线棋过多")
 
-    # 5. 过早接触战检测
+    # 4. 过早接触战检测
     early_contact = False
     for i in range(4, min(12, len(moves))):
         _, x, y = moves[i]
@@ -173,29 +176,25 @@ def _review_opening(moves, size, sgf):
                 early_contact = True
                 break
     if early_contact:
-        comments.append("布局阶段过早发生贴身接触战，跳过了占角拆边的基本流程。建议前15手先完成布局再战斗。")
+        comments.append("布局阶段过早发生贴身接触战，跳过了占角拆边的基本流程。")
         score -= 1
         issues.append("过早接触战")
 
-    # 6. 过早中腹
-    early_center = sum(1 for _, x, y in moves[:12] if _edge_dist(x, y, size) >= 5)
-    if early_center >= 2:
-        comments.append(f"布局阶段有{early_center}手在中腹，放弃了角边实地。")
+    # 5. 复盘对象过早中腹
+    r_center = sum(1 for x, y in reviewee_moves[:8] if _edge_dist(x, y, size) >= 5)
+    if r_center >= 2:
+        comments.append(f"{reviewee_name}布局阶段有{r_center}手在中腹，放弃了角边实地。")
         score -= 1
         issues.append("过早中腹")
 
     if not issues:
-        comments.append("布局基本符合围棋原理，角部占领合理。")
+        comments.append(f"{reviewee_name}布局基本符合围棋原理，角部占领合理。")
 
-    return {
-        "score": max(0, score),
-        "comments": comments,
-        "issues": issues,
-    }
+    return {"score": max(0, score), "comments": comments, "issues": issues}
 
 
-def _review_transition(moves, size, start_idx):
-    """分析序盘过渡"""
+def _review_transition(moves, size, start_idx, reviewee_color="black", reviewee_name="棋手"):
+    """分析序盘过渡（从复盘对象视角）"""
     comments = []
     issues = []
 
@@ -232,8 +231,8 @@ def _review_transition(moves, size, start_idx):
     return {"score": max(0, score), "comments": comments, "issues": issues}
 
 
-def _review_midgame(moves, size, start_idx):
-    """分析中盘"""
+def _review_midgame(moves, size, start_idx, reviewee_color="black", reviewee_name="棋手"):
+    """分析中盘（从复盘对象视角）"""
     comments = []
     issues = []
 
@@ -292,8 +291,8 @@ def _review_midgame(moves, size, start_idx):
     return {"score": max(0, score), "comments": comments, "issues": issues}
 
 
-def _review_endgame(moves, size, start_idx, result):
-    """分析官子"""
+def _review_endgame(moves, size, start_idx, result, reviewee_name="棋手", reviewee_won=False):
+    """分析官子（从复盘对象视角）"""
     comments = []
     issues = []
 
@@ -330,11 +329,13 @@ def _review_endgame(moves, size, start_idx, result):
     return {"score": 3, "comments": comments, "issues": issues}
 
 
-def _find_key_moves(moves, size, total):
-    """找出关键手（可能有问题的选点）"""
+def _find_key_moves(moves, size, total, reviewee_color="black"):
+    """找出复盘对象的关键手（可能有问题的选点）"""
     key_moves = []
 
     for i, (color, x, y) in enumerate(moves[:30]):
+        if color != reviewee_color:
+            continue  # 只分析复盘对象的棋
         ed = _edge_dist(x, y, size)
         pt = _classify_point(x, y, size)
         gtp = _gtp(x, y, size)
@@ -408,8 +409,8 @@ def _estimate_territory(moves, size, total):
     return _estimate_territitory(moves, size, total)
 
 
-def _build_summary(phases, result, total, meta):
-    """生成总结"""
+def _build_summary(phases, result, total, meta, reviewee_name="棋手", reviewee_won=False, is_black=True):
+    """生成总结（从复盘对象视角）"""
     all_issues = []
     for p in phases:
         all_issues.extend(p.get("issues", []))
@@ -419,13 +420,13 @@ def _build_summary(phases, result, total, meta):
 
     parts = []
 
-    # 总体评价
+    # 总体评价（从复盘对象视角）
     if avg_score >= 4:
-        parts.append("本局整体表现良好")
+        parts.append(f"{reviewee_name}本局整体表现良好")
     elif avg_score >= 3:
-        parts.append("本局整体表现一般")
+        parts.append(f"{reviewee_name}本局整体表现一般")
     else:
-        parts.append("本局存在明显问题")
+        parts.append(f"{reviewee_name}本局存在明显问题")
 
     # 主要问题
     from collections import Counter
@@ -434,18 +435,21 @@ def _build_summary(phases, result, total, meta):
         top_issues = issue_counts.most_common(3)
         parts.append("主要问题：" + "、".join(f"{iss}({cnt}次)" for iss, cnt in top_issues))
 
-    # 结果评价
+    # 结果评价（从复盘对象视角）
     if result:
         if 'R' in result:
-            winner = "黑" if result.startswith('B') else "白"
-            parts.append(f"以认输结束（{winner}方胜）")
+            if reviewee_won:
+                parts.append(f"{reviewee_name}获胜（对手认输）")
+            else:
+                parts.append(f"{reviewee_name}认输")
         elif result[2:].replace('.', '').isdigit():
             margin = float(result[2:])
-            winner = "黑" if result.startswith('B') else "白"
-            if margin <= 3:
-                parts.append(f"点目{winner}胜{margin}目，胜负在毫厘之间")
+            if reviewee_won:
+                parts.append(f"{reviewee_name}点目胜{margin}目")
             else:
-                parts.append(f"点目{winner}胜{margin}目")
+                parts.append(f"{reviewee_name}点目负{margin}目")
+                if margin <= 3:
+                    parts.append("惜败，差距极小")
 
     return "。".join(parts) + "。"
 

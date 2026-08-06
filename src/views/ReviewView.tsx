@@ -9,6 +9,7 @@ interface AiReviewResult {
   black_rank: string; white_rank: string;
   result: string; total_moves: number;
   board_size: number; date: string;
+  reviewee: string; reviewee_color: string; reviewee_won: boolean;
   phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
   key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
   summary: string;
@@ -205,23 +206,29 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
               <div style={{ marginBottom: 12 }}>
                 {/* 对战信息卡片 */}
                 <div style={{ padding: 12, background: "#f0f5ff", borderRadius: 6, border: "1px solid #adc6ff", marginBottom: 8 }}>
+                  {/* 复盘对象标签 */}
+                  <div style={{ textAlign: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, background: "#1890ff", color: "#fff", padding: "2px 8px", borderRadius: 8 }}>
+                      🎯 复盘对象：{aiReview.reviewee}（执{aiReview.reviewee_color}）· {aiReview.reviewee_won ? "胜" : "负"}
+                    </span>
+                  </div>
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginBottom: 8 }}>
                     {/* 黑方 */}
-                    <div style={{ textAlign: "center", minWidth: 100 }}>
-                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#111", margin: "0 auto 4px" }} />
+                    <div style={{ textAlign: "center", minWidth: 100, opacity: aiReview.reviewee_color === "黑" ? 1 : 0.7 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#111", margin: "0 auto 4px", border: aiReview.reviewee_color === "黑" ? "3px solid #1890ff" : "none" }} />
                       <div style={{ fontWeight: "bold", fontSize: 14 }}>{aiReview.black || "黑方"}</div>
                       {aiReview.black_rank && <div style={{ fontSize: 12, color: "#666" }}>{aiReview.black_rank}</div>}
                     </div>
                     {/* VS + 结果 */}
                     <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 18, fontWeight: "bold", color: resultColor(aiReview.result) }}>
-                        {resultLabel(aiReview.result)}
+                      <div style={{ fontSize: 18, fontWeight: "bold", color: aiReview.reviewee_won ? "#389e0d" : "#cf1322" }}>
+                        {aiReview.reviewee_won ? "胜" : "负"}
                       </div>
                       {aiReview.result && <div style={{ fontSize: 12, color: "#999" }}>{aiReview.result}</div>}
                     </div>
                     {/* 白方 */}
-                    <div style={{ textAlign: "center", minWidth: 100 }}>
-                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#fff", border: "2px solid #333", margin: "0 auto 4px" }} />
+                    <div style={{ textAlign: "center", minWidth: 100, opacity: aiReview.reviewee_color === "白" ? 1 : 0.7 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#fff", border: aiReview.reviewee_color === "白" ? "3px solid #1890ff" : "2px solid #333", margin: "0 auto 4px" }} />
                       <div style={{ fontWeight: "bold", fontSize: 14 }}>{aiReview.white || "白方"}</div>
                       {aiReview.white_rank && <div style={{ fontSize: 12, color: "#666" }}>{aiReview.white_rank}</div>}
                     </div>
@@ -365,14 +372,4 @@ function kindColor(k: MoveAnalysisDto["kind"], a: number): string {
   return k === "blunder" ? `rgba(207,19,34,${a})` : k === "inaccuracy" ? `rgba(212,160,23,${a})` : `rgba(56,158,13,${a})`;
 }
 
-function resultLabel(result: string): string {
-  if (!result) return "—";
-  if (result.startsWith("B+")) return "黑胜";
-  if (result.startsWith("W+")) return "白胜";
-  return result;
-}
-function resultColor(result: string): string {
-  if (result.startsWith("B+")) return "#111";
-  if (result.startsWith("W+")) return "#666";
-  return "#999";
-}
+// (helper functions removed - result label/color now inline in component)

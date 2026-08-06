@@ -10,6 +10,7 @@ interface Joseki {
   description: string;
   key_points: string;
   moves_sgf: string;
+  principles: { concept: string; explanation: string }[];
 }
 
 export default function JosekiView() {
@@ -127,6 +128,23 @@ export default function JosekiView() {
                 <strong>🔑 要点</strong>
                 <p style={{ margin: "6px 0 0", fontSize: 13, lineHeight: 1.6 }}>{selected.key_points}</p>
               </div>
+
+              {/* 棋理解读 */}
+              {selected.principles && selected.principles.length > 0 && (
+                <div style={{ padding: 12, background: "#f6ffed", borderRadius: 6, border: "1px solid #b7eb8f", marginTop: 8 }}>
+                  <strong>🧠 棋理解读（为什么这么下）</strong>
+                  {selected.principles.map((p, pi) => (
+                    <div key={pi} style={{ marginTop: 10, paddingBottom: pi < selected.principles.length - 1 ? 10 : 0, borderBottom: pi < selected.principles.length - 1 ? "1px dashed #d9f7be" : "none" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, background: "#52c41a", color: "#fff", padding: "1px 8px", borderRadius: 8, fontWeight: "bold" }}>
+                          {p.concept}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: "#333" }}>{p.explanation}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* 前后切换 */}
               <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "center" }}>

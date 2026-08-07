@@ -979,4 +979,5 @@ if dist_path.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # 0.0.0.0: 服务器部署时允许外部访问（systemd 服务直接运行本文件）
+    uvicorn.run(app, host="0.0.0.0", port=8000)

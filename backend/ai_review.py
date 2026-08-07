@@ -52,6 +52,15 @@ def review_game(sgf: str) -> dict:
     # 中盘（30%-70%）
     midgame_end = max(transition_end + 10, int(total * 0.70))
     midgame_review = _review_midgame(moves[transition_end:midgame_end], size, transition_end, reviewee_color, reviewee_name)
+    # 孤棋被攻击检测：重建到中盘结束的盘面，找复盘对象的弱棋块
+    isolated = _detect_isolated_groups(moves, size, midgame_end, reviewee_color)
+    if isolated:
+        midgame_review["issues"].append("孤棋被攻击")
+        midgame_review["comments"].append(
+            f"复盘对象有{len(isolated)}块中腹孤棋（无眼位、气少），被攻击风险高"
+        )
+        midgame_review["score"] = max(0, midgame_review["score"] - 1)
+        midgame_review["isolated_count"] = len(isolated)
     phases.append({"phase": "中盘", "range": f"第{transition_end+1}-{midgame_end}手", **midgame_review})
 
     # 官子（70%-100%）
@@ -289,6 +298,63 @@ def _review_midgame(moves, size, start_idx, reviewee_color="black", reviewee_nam
         score -= 1
 
     return {"score": max(0, score), "comments": comments, "issues": issues}
+
+
+def _detect_isolated_groups(moves, size, end_idx, reviewee_color):
+    """
+    重建到 end_idx 的盘面，检测复盘对象的中腹孤棋块。
+    孤棋判定：无 2 眼 + 气少（<=4）+ 块内含中腹子（距边 >=4）+ 块小（<=7子）
+    返回孤棋块列表 [{stones, liberties, center_stones}]
+    """
+    from game_state import GameState, Color
+
+    gs = GameState.new(size)
+    target = Color.BLACK if reviewee_color == "black" else Color.WHITE
+    for i, (c, x, y) in enumerate(moves[:end_idx]):
+        try:
+            gs.play(Color.BLACK if c == "black" else Color.WHITE, x, y)
+        except ValueError:
+            continue
+
+    visited: set[tuple[int, int]] = set()
+    groups = []
+    for y in range(size):
+        for x in range(size):
+            if (x, y) in visited or gs.stone_at(x, y) != target.value:
+                continue
+            group, libs = gs._group_and_liberties(x, y)
+            for gx, gy in group:
+                visited.add((gx, gy))
+            groups.append((group, libs))
+
+    isolated = []
+    for group, libs in groups:
+        gset = set(group)
+        if len(group) > 7:
+            continue
+        # 眼位计数：块内邻接的空点，4 邻（盘内）全是己方
+        eyes = set()
+        for gx, gy in group:
+            for nx, ny in ((gx - 1, gy), (gx + 1, gy), (gx, gy - 1), (gx, gy + 1)):
+                if not (0 <= nx < size and 0 <= ny < size):
+                    continue
+                if (nx, ny) in gset or gs.stone_at(nx, ny) is not None:
+                    continue
+                if all(
+                    (0 <= ax < size and 0 <= ay < size
+                     and (gs.stone_at(ax, ay) == target.value or (ax, ay) in gset))
+                    for ax, ay in ((nx - 1, ny), (nx + 1, ny), (nx, ny - 1), (nx, ny + 1))
+                ):
+                    eyes.add((nx, ny))
+        if len(eyes) >= 2:
+            continue  # 已有两眼，不是孤棋
+        center = sum(1 for gx, gy in group if _edge_dist(gx, gy, size) >= 4)
+        if libs <= 4 and center > 0:
+            isolated.append({
+                "stones": len(group), "liberties": libs, "center_stones": center,
+                "group": group,
+            })
+    return isolated
 
 
 def _review_endgame(moves, size, start_idx, result, reviewee_name="棋手", reviewee_won=False):

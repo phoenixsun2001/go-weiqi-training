@@ -137,6 +137,10 @@ export const api = {
     return get<{ joseki: any[]; categories: string[] }>(`/api/joseki/list${query}`);
   },
 
+  // 棋理概念索引：concept -> 相关定式（训练任务定位用）
+  getJosekiConcepts: () =>
+    get<Record<string, { name: string; category: string; difficulty: number; explanation: string }[]>>("/api/joseki/concepts"),
+
   // 棋力面板
   ratingHistory: () => get<{ recorded_at: string; elo: number }[]>("/api/rating/history"),
 
@@ -174,6 +178,9 @@ export const api = {
     put<{ ok: boolean }>(`/api/training/task/${taskId}/status`, { status }),
   getTrainingWeakness: () =>
     get<TrainingWeaknessDto>("/api/training/weakness"),
+  // 复盘任务的典型对局匹配：{task_id: [对局]}
+  getTrainingMatches: () =>
+    get<Record<number, TrainingMatchDto[]>>("/api/training/matches"),
 
   // WebSocket 流式复盘（同源，部署版自动指向服务器）
   wsReviewUrl: () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/review`,
@@ -196,4 +203,14 @@ export interface TrainingWeaknessDto {
   total_games: number;
   phase_scores: Record<string, number>;
   weaknesses: { issue: string; count: number; percentage: number }[];
+}
+
+export interface TrainingMatchDto {
+  game_id: number;
+  date: string;
+  opponent: string;
+  opponent_rank: string;
+  result: string;
+  reason: string;
+  score: number;
 }

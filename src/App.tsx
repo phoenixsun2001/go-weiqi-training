@@ -17,10 +17,23 @@ interface PendingReview {
 export default function App() {
   const [tab, setTab] = useState<Tab>("game");
   const [pendingReview, setPendingReview] = useState<PendingReview | null>(null);
+  // 训练任务跳转参数
+  const [josekiTarget, setJosekiTarget] = useState<string | null>(null);
+  const [problemDifficulty, setProblemDifficulty] = useState<number>(0);
 
   const handleReviewGame = (gameId: number, sgf: string) => {
     setPendingReview({ gameId, sgf });
     setTab("review-detail");
+  };
+
+  const handleNavigateJoseki = (name: string) => {
+    setJosekiTarget(name);
+    setTab("joseki");
+  };
+
+  const handleNavigateProblem = (difficulty: number) => {
+    setProblemDifficulty(difficulty);
+    setTab("problem");
   };
 
   return (
@@ -69,11 +82,16 @@ export default function App() {
       ) : tab === "library" ? (
         <LibraryView onReviewGame={handleReviewGame} />
       ) : tab === "problem" ? (
-        <ProblemView />
+        <ProblemView initialDifficulty={problemDifficulty} />
       ) : tab === "training" ? (
-        <TrainingView onNavigate={(t) => setTab(t as Tab)} />
+        <TrainingView
+          onNavigate={(t) => setTab(t as Tab)}
+          onReviewGame={handleReviewGame}
+          onNavigateJoseki={handleNavigateJoseki}
+          onNavigateProblem={handleNavigateProblem}
+        />
       ) : (
-        <JosekiView />
+        <JosekiView initialName={josekiTarget} />
       )}
     </div>
   );

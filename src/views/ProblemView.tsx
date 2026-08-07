@@ -10,7 +10,12 @@ interface AnswerState {
   answerXy: { x: number; y: number }[];
 }
 
-export default function ProblemView() {
+interface Props {
+  /** 训练任务跳转：初始难度（2=easy, 4=intermediate, 6=hard），0=自动 */
+  initialDifficulty?: number;
+}
+
+export default function ProblemView({ initialDifficulty }: Props) {
   const [problem, setProblem] = useState<ProblemDto | null>(null);
   const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(null);
   const [pickedVertex, setPickedVertex] = useState<string | null>(null);
@@ -21,7 +26,7 @@ export default function ProblemView() {
   const [error, setError] = useState<string | null>(null);
   const [solved, setSolved] = useState(0);
   const [attempted, setAttempted] = useState(0);
-  const [difficulty, setDifficulty] = useState<number>(0); // 0 = 自动(跟随棋力)
+  const [difficulty, setDifficulty] = useState<number>(initialDifficulty ?? 0); // 0 = 自动(跟随棋力)
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
@@ -268,16 +273,20 @@ function sgfToSnapshot(sgf: string): BoardSnapshot {
   const sizeMatch = sgf.match(/SZ\[(\d+)\]/);
   const size = sizeMatch ? Number(sizeMatch[1]) : 19;
   const stones: BoardSnapshot["stones"] = Array(size * size).fill(null);
-  const re = /;([BW])\[([a-z]{2})\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sgf)) !== null) {
-    const color = m[1] === "B" ? "black" : "white";
-    const x = m[2].charCodeAt(0) - 97;
-    const y = m[2].charCodeAt(1) - 97;
-    if (x >= 0 && x < size && y >= 0 && y < size) {
-      stones[y * size + x] = color;
+  // 初始摆子属性 AB（黑）/ AW（白）——死活题题面
+  const setStones = (attr: "AB" | "AW", color: "black" | "white") => {
+    const m = sgf.match(new RegExp(`\\b${attr}((?:\\[[a-z]{2}\\])+)`));
+    if (!m) return;
+    for (const mm of m[1].matchAll(/\[([a-z]{2})\]/g)) {
+      const x = mm[1].charCodeAt(0) - 97;
+      const y = mm[1].charCodeAt(1) - 97;
+      if (x >= 0 && x < size && y >= 0 && y < size) {
+        stones[y * size + x] = color;
+      }
     }
-  }
+  };
+  setStones("AB", "black");
+  setStones("AW", "white");
   return { size, stones, turn: "black" };
 }
 

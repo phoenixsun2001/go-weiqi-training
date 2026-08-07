@@ -13,7 +13,12 @@ interface Joseki {
   principles: { concept: string; explanation: string }[];
 }
 
-export default function JosekiView() {
+interface Props {
+  /** 外部指定的定式名称（训练任务跳转），自动选中匹配的定式 */
+  initialName?: string | null;
+}
+
+export default function JosekiView({ initialName }: Props) {
   const [josekiList, setJosekiList] = useState<Joseki[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>("");
@@ -35,6 +40,23 @@ export default function JosekiView() {
       })
       .catch((e: unknown) => setError(String(e)));
   }, []);
+
+  // 训练任务跳转：按名称自动选中（模糊匹配：定式名包含目标名或反之）
+  useEffect(() => {
+    if (!initialName || josekiList.length === 0) return;
+    const target = initialName.replace(/[（(].*?[）)]/g, "").trim(); // 去括号后缀
+    const hit = josekiList.find(
+      (j) => j.name.includes(target) || target.includes(j.name.replace(/[（(].*?[）)]/g, ""))
+    );
+    if (!hit) return;
+    if (activeCategory) {
+      // 当前有分类筛选，重置为全部列表后重新触发
+      setActiveCategory("");
+      api.getJoseki().then((d: { joseki: Joseki[]; categories: string[] }) => setJosekiList(d.joseki));
+      return;
+    }
+    selectJoseki(hit);
+  }, [initialName, josekiList]);
 
   const selectJoseki = (j: Joseki) => {
     setSelected(j);

@@ -164,6 +164,13 @@ class Store:
         self.update_elo(elo_after)
 
     # ===== Problems =====
+    def problem_sgf_exists(self, question_sgf: str) -> bool:
+        """按 SGF 内容判重（seed 导入可重复执行）"""
+        row = self.conn.execute(
+            "SELECT 1 FROM problem WHERE question_sgf=? LIMIT 1", (question_sgf,)
+        ).fetchone()
+        return row is not None
+
     def insert_problem(self, category: str, difficulty: int, question_sgf: str, answer_vertex: str, explanation: str) -> int:
         cur = self.conn.execute(
             "INSERT INTO problem(category,difficulty,question_sgf,answer_vertex,explanation) VALUES(?,?,?,?,?)",

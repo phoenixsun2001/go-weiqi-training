@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { api } from "../lib/api";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { api, TrainingMatchDto } from "../lib/api";
 
 interface Task {
   id: number; week: number; day: number; category: string;
@@ -19,8 +19,15 @@ interface WeaknessSummary {
   weaknesses: { issue: string; count: number; percentage: number }[];
 }
 
+interface JosekiItem {
+  name: string; category: string; difficulty: number; explanation: string;
+}
+
 interface Props {
   onNavigate: (tab: string) => void;
+  onReviewGame: (gameId: number, sgf: string) => void;
+  onNavigateJoseki: (josekiName: string) => void;
+  onNavigateProblem: (difficulty: number) => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -31,10 +38,14 @@ const MODULE_LABELS: Record<string, string> = {
   problem: "题库", joseki: "定式", review: "复盘", practice: "实战",
 };
 
-export default function TrainingView({ onNavigate }: Props) {
+export default function TrainingView({ onNavigate, onReviewGame, onNavigateJoseki, onNavigateProblem }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [weakness, setWeakness] = useState<WeaknessSummary | null>(null);
+  const [matches, setMatches] = useState<Record<number, TrainingMatchDto[]>>({});
+  const [concepts, setConcepts] = useState<Record<string, JosekiItem[]>>({});
+  const [josekiNames, setJosekiNames] = useState<string[]>([]);
+  const [games, setGames] = useState<{ id: number; sgf: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeWeek, setActiveWeek] = useState(1);
   const [hasPlan, setHasPlan] = useState(false);
@@ -42,14 +53,22 @@ export default function TrainingView({ onNavigate }: Props) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskList, prog, weak] = await Promise.all([
+      const [taskList, prog, weak, m, c, j, g] = await Promise.all([
         api.getTrainingTasks(),
         api.getTrainingProgress(),
         api.getTrainingWeakness(),
+        api.getTrainingMatches(),
+        api.getJosekiConcepts(),
+        api.getJoseki(),
+        api.listImportedGames(),
       ]);
       setTasks(taskList);
       setProgress(prog);
       setWeakness(weak);
+      setMatches(m);
+      setConcepts(c);
+      setJosekiNames((j.joseki ?? []).map((x: { name: string }) => x.name));
+      setGames(g);
       setHasPlan(taskList.length > 0);
     } catch {
       // ignore
@@ -60,6 +79,33 @@ export default function TrainingView({ onNavigate }: Props) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 每个定式类任务的相关定式：概念匹配（任务文案提到的棋理概念）+ 名称模糊匹配
+  const relatedJoseki = useMemo(() => {
+    const map: Record<number, JosekiItem[]> = {};
+    for (const t of tasks) {
+      if (t.target_module !== "joseki") continue;
+      const text = t.title + t.description;
+      const found: JosekiItem[] = [];
+      // 1. 概念匹配：任务文案包含概念名
+      for (const [concept, items] of Object.entries(concepts)) {
+        if (text.includes(concept)) {
+          for (const it of items) {
+            if (!found.some((f) => f.name === it.name)) found.push(it);
+          }
+        }
+      }
+      // 2. 名称匹配：任务文案包含定式名（含简称）
+      for (const name of josekiNames) {
+        const short = name.replace(/[（(].*?[）)]/g, "");
+        if (text.includes(short) || text.includes(name)) {
+          if (!found.some((f) => f.name === name)) found.push({ name, category: "", difficulty: 0, explanation: "" });
+        }
+      }
+      map[t.id] = found.slice(0, 4);
+    }
+    return map;
+  }, [tasks, concepts, josekiNames]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -185,6 +231,8 @@ export default function TrainingView({ onNavigate }: Props) {
               const isDone = t.status === "done";
               const isSkipped = t.status === "skipped";
               const catColor = CATEGORY_COLORS[t.category] || "#666";
+              const taskMatches = matches[t.id] ?? [];
+              const taskJoseki = relatedJoseki[t.id] ?? [];
               return (
                 <div
                   key={t.id}
@@ -212,11 +260,62 @@ export default function TrainingView({ onNavigate }: Props) {
                       <div style={{ fontSize: 12, color: "#666", lineHeight: 1.5 }}>{t.description}</div>
                     </div>
                   </div>
+
+                  {/* 复盘任务：匹配的典型对局 */}
+                  {t.target_module === "review" && taskMatches.length > 0 && !isDone && (
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontSize: 11, color: "#999" }}>已为你匹配典型对局（点击直接复盘）：</div>
+                      {taskMatches.map((m) => {
+                        const game = games.find((g) => g.id === m.game_id);
+                        return (
+                          <button
+                            key={m.game_id}
+                            onClick={() => onReviewGame(m.game_id, game?.sgf ?? "")}
+                            style={{
+                              textAlign: "left", fontSize: 12, padding: "5px 10px", border: "1px solid #d9d9d9",
+                              borderRadius: 6, background: "#fafafa", cursor: "pointer", color: "#333",
+                            }}
+                          >
+                            📅 {m.date || "?"} · vs {m.opponent}({m.opponent_rank || "?"}) · {m.result} ·{" "}
+                            <span style={{ color: "#fa8c16" }}>{m.reason}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* 定式任务：相关定式 */}
+                  {t.target_module === "joseki" && taskJoseki.length > 0 && !isDone && (
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontSize: 11, color: "#999" }}>本任务相关的定式（点击直达学习）：</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {taskJoseki.map((j) => (
+                          <button
+                            key={j.name}
+                            onClick={() => onNavigateJoseki(j.name)}
+                            style={{
+                              fontSize: 11, padding: "4px 10px", border: "1px solid #2f54eb", color: "#2f54eb",
+                              borderRadius: 12, cursor: "pointer", background: "#f0f5ff",
+                            }}
+                          >
+                            {j.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* 操作按钮 */}
                   <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
                     {(t.target_module === "problem" || t.target_module === "joseki" || t.target_module === "review") && !isDone && (
                       <button
-                        onClick={() => onNavigate(t.target_module === "problem" ? "problem" : t.target_module === "joseki" ? "joseki" : "review")}
+                        onClick={() =>
+                          t.target_module === "problem"
+                            ? onNavigateProblem(t.difficulty)
+                            : t.target_module === "joseki"
+                            ? onNavigate("joseki")
+                            : onNavigate("review")
+                        }
                         style={{ fontSize: 11, padding: "2px 8px", border: "1px solid #1890ff", color: "#1890ff", borderRadius: 4, cursor: "pointer" }}
                       >
                         去做 →

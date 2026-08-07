@@ -117,18 +117,22 @@ app.add_middleware(
 
 
 def seed_problems():
-    """从 backend/resources/tsumego 导入死活题"""
+    """从 backend/resources/tsumego 导入死活题（按 question_sgf 去重，可重复执行）"""
     base = Path(__file__).parent / "resources" / "tsumego"
     if not base.exists():
         base = Path(__file__).parent.parent / "resources" / "tsumego"
     levels = [("easy", 2), ("intermediate", 4), ("hard", 6)]
     imported = 0
+    skipped = 0
     for dir_name, diff in levels:
         d = base / dir_name
         if not d.exists():
             continue
         for sgf_file in d.glob("*.sgf"):
             sgf_content = sgf_file.read_text(encoding="utf-8")
+            if store.problem_sgf_exists(sgf_content):
+                skipped += 1
+                continue
             answer = extract_tsumego_answer(sgf_content)
             if not answer:
                 continue
@@ -140,7 +144,7 @@ def seed_problems():
                     break
             store.insert_problem("tsumego", diff, sgf_content, answer, explanation)
             imported += 1
-    print(f"[seed] 导入 {imported} 道死活题")
+    print(f"[seed] 导入 {imported} 道死活题（已存在 {skipped} 道跳过）")
 
 
 # ===== 棋盘 / 对战 =====
@@ -792,8 +796,35 @@ def joseki_list(category: str | None = None):
     return {"joseki": all_joseki, "categories": get_categories()}
 
 
+@app.get("/api/joseki/concepts")
+def joseki_concepts():
+    """棋理解读概念索引：concept -> 相关定式列表（训练任务定位用）"""
+    index: dict[str, list[dict]] = {}
+    for j in get_all_joseki():
+        for p in j.get("principles", []):
+            concept = p["concept"]
+            if concept not in index:
+                index[concept] = []
+            index[concept].append({
+                "name": j["name"], "category": j["category"],
+                "difficulty": j["difficulty"], "explanation": p["explanation"],
+            })
+    return index
+
+
 # ===== 专项强化计划 =====
 from training_plan import generate_plan, get_weakness_summary
+from game_matcher import match_games_for_tasks
+
+
+@app.get("/api/training/matches")
+def training_matches():
+    """为训练计划中的复盘任务匹配典型对局（负局/胜局/过早接触战/序盘急于战斗/中腹浮棋/孤棋被攻击）"""
+    tasks = store.list_training_tasks()
+    games = store.list_imported_games()
+    if not tasks or not games:
+        return {}
+    return match_games_for_tasks(tasks, games)
 
 
 @app.post("/api/training/generate")

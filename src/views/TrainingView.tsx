@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { api, TrainingMatchDto } from "../lib/api";
+import { GO_PRINCIPLES } from "../data/goWisdom";
 
 interface Task {
   id: number; week: number; day: number; category: string;
@@ -36,6 +37,14 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const MODULE_LABELS: Record<string, string> = {
   problem: "题库", joseki: "定式", review: "复盘", practice: "实战",
+};
+
+// 每周训练关联的棋理十诀（棋理课堂）
+const WEEK_PRINCIPLES: Record<number, number[]> = {
+  1: [3, 9],      // 压三不压四 / 扁平边不连片
+  2: [1],         // 软头不能脱先
+  3: [4, 5, 6, 7, 8], // 打入原则 / 避免坏形 / 一间距离 / 杀棋三问
+  4: [2, 10],     // 软头不硬扳 / 围中间模样三条件
 };
 
 export default function TrainingView({ onNavigate, onReviewGame, onNavigateJoseki, onNavigateProblem }: Props) {
@@ -224,6 +233,28 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
 
           {/* 周标题 */}
           <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{weekTitles[activeWeek]}</h3>
+
+          {/* 本周关联棋理 */}
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#999" }}>本周棋理：</span>
+            {WEEK_PRINCIPLES[activeWeek]?.map((pid) => {
+              const p = GO_PRINCIPLES.find((x) => x.id === pid);
+              if (!p) return null;
+              return (
+                <button
+                  key={pid}
+                  onClick={() => onNavigate("wisdom")}
+                  style={{
+                    fontSize: 11, padding: "3px 10px", border: "1px solid #fa8c16", color: "#d46b08",
+                    borderRadius: 12, cursor: "pointer", background: "#fff7e6",
+                  }}
+                  title={p.detail}
+                >
+                  {p.id}. {p.title}
+                </button>
+              );
+            })}
+          </div>
 
           {/* 任务列表 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

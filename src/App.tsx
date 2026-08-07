@@ -6,8 +6,9 @@ import ProblemView from "./views/ProblemView";
 import JosekiView from "./views/JosekiView";
 import LibraryView from "./views/LibraryView";
 import TrainingView from "./views/TrainingView";
+import GoWisdomView from "./views/GoWisdomView";
 
-type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "joseki" | "training";
+type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "joseki" | "training" | "wisdom";
 
 interface PendingReview {
   gameId: number;
@@ -66,6 +67,9 @@ export default function App() {
           <button onClick={() => setTab("training")} style={tabBtn(tab === "training")}>
             训练
           </button>
+          <button onClick={() => setTab("wisdom")} style={tabBtn(tab === "wisdom")}>
+            棋理
+          </button>
         </nav>
       </header>
       {tab === "game" ? (
@@ -90,6 +94,8 @@ export default function App() {
           onNavigateJoseki={handleNavigateJoseki}
           onNavigateProblem={handleNavigateProblem}
         />
+      ) : tab === "wisdom" ? (
+        <GoWisdomView />
       ) : (
         <JosekiView initialName={josekiTarget} />
       )}

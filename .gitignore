@@ -7,3 +7,4 @@ katago/
 __pycache__/
 *.pyc
 backend/resources/tsumego/
+.playwright-mcp/

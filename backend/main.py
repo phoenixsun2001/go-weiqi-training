@@ -792,6 +792,84 @@ def joseki_list(category: str | None = None):
     return {"joseki": all_joseki, "categories": get_categories()}
 
 
+# ===== 专项强化计划 =====
+from training_plan import generate_plan, get_weakness_summary
+
+
+@app.post("/api/training/generate")
+def training_generate():
+    """分析对局库中的棋谱，生成4周训练计划"""
+    # 如果已有计划，不重复生成
+    if store.training_task_count() > 0:
+        return {"message": "训练计划已存在", "task_count": store.training_task_count()}
+
+    # 获取对局库中的棋谱
+    games = store.list_imported_games()
+    if not games:
+        return {"message": "对局库为空，请先导入棋谱", "task_count": 0}
+
+    # 生成计划
+    tasks = generate_plan()
+    for t in tasks:
+        store.insert_training_task(
+            t["week"], t["day"], t["category"], t["title"], t["description"],
+            t["target_module"], t["difficulty"], t["sort_order"]
+        )
+    return {"message": f"训练计划已生成：{len(tasks)}个任务（4周）", "task_count": len(tasks)}
+
+
+@app.get("/api/training/tasks")
+def training_tasks():
+    """获取全部训练任务"""
+    return store.list_training_tasks()
+
+
+@app.get("/api/training/progress")
+def training_progress():
+    """获取训练进度统计"""
+    tasks = store.list_training_tasks()
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["status"] == "done")
+    skipped = sum(1 for t in tasks if t["status"] == "skipped")
+    pending = total - done - skipped
+    # 按周统计
+    weeks = {}
+    for t in tasks:
+        w = t["week"]
+        if w not in weeks:
+            weeks[w] = {"total": 0, "done": 0, "pending": 0}
+        weeks[w]["total"] += 1
+        if t["status"] == "done":
+            weeks[w]["done"] += 1
+        else:
+            weeks[w]["pending"] += 1
+    return {
+        "total": total, "done": done, "skipped": skipped, "pending": pending,
+        "completion_rate": round(done / max(total, 1) * 100),
+        "weeks": weeks,
+    }
+
+
+class TaskStatusReq(BaseModel):
+    status: str  # "done" | "skipped" | "pending"
+
+
+@app.put("/api/training/task/{task_id}/status")
+def update_task_status(task_id: int, req: TaskStatusReq):
+    """更新任务状态"""
+    store.update_task_status(task_id, req.status)
+    return {"ok": True}
+
+
+@app.get("/api/training/weakness")
+def training_weakness():
+    """获取弱点摘要（基于对局库AI复盘）"""
+    games = store.list_imported_games()
+    if not games:
+        return {"total_games": 0, "phase_scores": {}, "weaknesses": []}
+    return get_weakness_summary(games)
+
+
 # ===== 棋力面板 =====
 @app.get("/api/rating/history")
 def rating_history():

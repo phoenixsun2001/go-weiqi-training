@@ -5,8 +5,9 @@ import ReviewHistoryView from "./views/ReviewHistoryView";
 import ProblemView from "./views/ProblemView";
 import JosekiView from "./views/JosekiView";
 import LibraryView from "./views/LibraryView";
+import TrainingView from "./views/TrainingView";
 
-type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "joseki";
+type Tab = "game" | "review" | "review-detail" | "library" | "problem" | "joseki" | "training";
 
 interface PendingReview {
   gameId: number;
@@ -49,6 +50,9 @@ export default function App() {
           <button onClick={() => setTab("joseki")} style={tabBtn(tab === "joseki")}>
             定式
           </button>
+          <button onClick={() => setTab("training")} style={tabBtn(tab === "training")}>
+            训练
+          </button>
         </nav>
       </header>
       {tab === "game" ? (
@@ -66,6 +70,8 @@ export default function App() {
         <LibraryView onReviewGame={handleReviewGame} />
       ) : tab === "problem" ? (
         <ProblemView />
+      ) : tab === "training" ? (
+        <TrainingView onNavigate={(t) => setTab(t as Tab)} />
       ) : (
         <JosekiView />
       )}

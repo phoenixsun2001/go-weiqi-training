@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS review_result (
     summary TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(game_id) REFERENCES imported_game(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS training_task (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week INTEGER NOT NULL,
+    day INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    target_module TEXT NOT NULL DEFAULT 'practice',
+    difficulty INTEGER DEFAULT 3,
+    status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT,
+    sort_order INTEGER DEFAULT 0
+);
 """
 
 CATEGORY_LABELS = {
@@ -287,3 +300,32 @@ class Store:
     def get_review_result(self, game_id: int) -> dict | None:
         row = self.conn.execute("SELECT * FROM review_result WHERE game_id=?", (game_id,)).fetchone()
         return dict(row) if row else None
+
+    # ===== Training Plan =====
+    def clear_training_tasks(self):
+        self.conn.execute("DELETE FROM training_task")
+        self.conn.commit()
+
+    def insert_training_task(self, week, day, category, title, description, target_module, difficulty, sort_order):
+        cur = self.conn.execute(
+            "INSERT INTO training_task(week,day,category,title,description,target_module,difficulty,status,sort_order) "
+            "VALUES(?,?,?,?,?,?,?,'pending',?)",
+            (week, day, category, title, description, target_module, difficulty, sort_order),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_training_tasks(self):
+        rows = self.conn.execute("SELECT * FROM training_task ORDER BY week, day, sort_order").fetchall()
+        return [dict(r) for r in rows]
+
+    def update_task_status(self, task_id, status):
+        completed_at = _now() if status == "done" else None
+        self.conn.execute(
+            "UPDATE training_task SET status=?, completed_at=? WHERE id=?",
+            (status, completed_at, task_id),
+        )
+        self.conn.commit()
+
+    def training_task_count(self):
+        return self.conn.execute("SELECT COUNT(*) FROM training_task").fetchone()[0]

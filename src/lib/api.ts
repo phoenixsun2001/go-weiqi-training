@@ -18,7 +18,8 @@ import type {
   WrongBookDto,
 } from "../types";
 
-const BASE = "http://127.0.0.1:8000";
+// API 基地址：默认同源（部署时由后端托管 dist），本地开发可用 VITE_API_BASE 覆盖
+const BASE = import.meta.env.VITE_API_BASE ?? "";
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -162,6 +163,37 @@ export const api = {
       date_to: params.date_to ?? null,
     }),
 
-  // WebSocket 流式复盘
-  wsReviewUrl: () => `ws://127.0.0.1:8000/ws/review`,
+  // 训练计划
+  generateTrainingPlan: () =>
+    post<{ message: string; task_count: number }>("/api/training/generate"),
+  getTrainingTasks: () =>
+    get<TrainingTaskDto[]>("/api/training/tasks"),
+  getTrainingProgress: () =>
+    get<TrainingProgressDto>("/api/training/progress"),
+  updateTrainingTaskStatus: (taskId: number, status: string) =>
+    put<{ ok: boolean }>(`/api/training/task/${taskId}/status`, { status }),
+  getTrainingWeakness: () =>
+    get<TrainingWeaknessDto>("/api/training/weakness"),
+
+  // WebSocket 流式复盘（同源，部署版自动指向服务器）
+  wsReviewUrl: () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/review`,
 };
+
+export interface TrainingTaskDto {
+  id: number; week: number; day: number; category: string;
+  title: string; description: string; target_module: string;
+  difficulty: number; status: string; sort_order: number;
+  completed_at: string | null;
+}
+
+export interface TrainingProgressDto {
+  total: number; done: number; skipped: number; pending: number;
+  completion_rate: number;
+  weeks: Record<number, { total: number; done: number; pending: number }>;
+}
+
+export interface TrainingWeaknessDto {
+  total_games: number;
+  phase_scores: Record<string, number>;
+  weaknesses: { issue: string; count: number; percentage: number }[];
+}

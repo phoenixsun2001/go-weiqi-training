@@ -29,5 +29,10 @@ export default defineConfig({
     host: "127.0.0.1",
     port,
     strictPort: true,
+    // 本地开发代理：前端同源请求 /api、/ws 转发到 FastAPI 后端
+    proxy: {
+      "/api": "http://127.0.0.1:8000",
+      "/ws": { target: "ws://127.0.0.1:8000", ws: true },
+    },
   },
 });

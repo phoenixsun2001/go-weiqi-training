@@ -857,7 +857,7 @@ def joseki_concepts():
 
 
 # ===== 专项强化计划 =====
-from training_plan import generate_plan, get_weakness_summary
+from training_plan import generate_plan, get_weakness_summary, generate_adaptive_plan
 from game_matcher import match_games_for_tasks
 
 
@@ -873,24 +873,52 @@ def training_matches():
 
 @app.post("/api/training/generate")
 def training_generate():
-    """分析对局库中的棋谱，生成4周训练计划"""
-    # 如果已有计划，不重复生成
+    """首次生成4周训练计划（自适应版：按近期弱点排序每周主题）"""
     if store.training_task_count() > 0:
-        return {"message": "训练计划已存在", "task_count": store.training_task_count()}
-
-    # 获取对局库中的棋谱
-    games = store.list_imported_games()
-    if not games:
+        return {"message": "训练计划已存在（可用'重新生成'刷新）", "task_count": store.training_task_count()}
+    if not store.list_imported_games():
         return {"message": "对局库为空，请先导入棋谱", "task_count": 0}
+    return _do_regenerate(window_days=30)
 
-    # 生成计划
-    tasks = generate_plan()
-    for t in tasks:
+
+class RegenerateReq(BaseModel):
+    window_days: int = 14
+
+
+@app.post("/api/training/regenerate")
+def training_regen(req: RegenerateReq):
+    """根据近期(默认14天)对局弱点重新生成计划：清空现有任务与进度，重建28个任务"""
+    if not store.list_imported_games():
+        raise HTTPException(400, "对局库为空，无法生成计划")
+    window = min(max(7, req.window_days), 90)
+    return _do_regenerate(window_days=window)
+
+
+def _do_regenerate(window_days: int) -> dict:
+    # 先确保对局库 AI 复盘覆盖（缺失即补算，保证弱点数据新鲜）
+    try:
+        from review_service import backfill_all
+        backfill_all(store)
+    except Exception:
+        pass
+
+    plan = generate_adaptive_plan(store, window_days)
+    store.clear_training_tasks()
+    for t in plan["tasks"]:
         store.insert_training_task(
             t["week"], t["day"], t["category"], t["title"], t["description"],
             t["target_module"], t["difficulty"], t["sort_order"]
         )
-    return {"message": f"训练计划已生成：{len(tasks)}个任务（4周）", "task_count": len(tasks)}
+    meta = plan["meta"]
+    focus = " → ".join(f"W{f['week']}{f['phase']}" for f in meta["weekly_focus"])
+    return {
+        "message": (
+            f"已基于最近{meta['window_days']}天{meta['games_analyzed']}局重新生成"
+            f"（{len(plan['tasks'])}个任务）。周主题排序：{focus}。原进度已重置。"
+        ),
+        "task_count": len(plan["tasks"]),
+        "meta": meta,
+    }
 
 
 @app.get("/api/training/tasks")

@@ -183,6 +183,9 @@ export const api = {
   // 训练计划
   generateTrainingPlan: () =>
     post<{ message: string; task_count: number }>("/api/training/generate"),
+  // 按近期窗口弱点重新生成（清空现有进度）
+  regenerateTrainingPlan: (windowDays = 14) =>
+    post<{ message: string; task_count: number; meta?: RegenerateMeta }>("/api/training/regenerate", { window_days: windowDays }),
   getTrainingTasks: () =>
     get<TrainingTaskDto[]>("/api/training/tasks"),
   getTrainingProgress: () =>
@@ -264,6 +267,14 @@ export interface SyncLogDto {
 export interface SyncRunResult {
   ok: boolean; imported?: number; skipped?: number; failed?: number;
   message?: string; ai_backfill?: number;
+}
+
+export interface RegenerateMeta {
+  window_days: number;
+  games_analyzed: number;
+  phase_rank: string[];
+  weekly_focus: { week: number; phase: string }[];
+  top_issues: { issue: string; count: number; percentage: number }[];
 }
 
 export interface InsightsDto {

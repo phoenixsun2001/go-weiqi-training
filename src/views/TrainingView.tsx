@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { api, TrainingMatchDto, InsightsDto } from "../lib/api";
+import { api, TrainingMatchDto, InsightsDto, RegenerateMeta } from "../lib/api";
 import { GO_PRINCIPLES } from "../data/goWisdom";
 
 interface Task {
@@ -39,12 +39,13 @@ const MODULE_LABELS: Record<string, string> = {
   problem: "题库", joseki: "定式", review: "复盘", practice: "实战",
 };
 
-// 每周训练关联的棋理十诀（棋理课堂）
-const WEEK_PRINCIPLES: Record<number, number[]> = {
-  1: [3, 9],      // 压三不压四 / 扁平边不连片
-  2: [1],         // 软头不能脱先
-  3: [4, 5, 6, 7, 8], // 打入原则 / 避免坏形 / 一间距离 / 杀棋三问
-  4: [2, 10],     // 软头不硬扳 / 围中间模样三条件
+// 每类训练主题关联的棋理十诀（自适应计划按阶段动态排列周序）
+const THEME_PRINCIPLES: Record<string, number[]> = {
+  "布局": [3, 9],       // 压三不压四 / 扁平边不连片
+  "序盘": [1],          // 软头不能脱先
+  "中盘": [4, 5, 6, 7, 8], // 打入原则 / 避免坏形 / 一间距离 / 杀棋三问
+  "综合": [2, 10],      // 软头不硬扳 / 围中间模样三条件
+  "官子": [],
 };
 
 export default function TrainingView({ onNavigate, onReviewGame, onNavigateJoseki, onNavigateProblem }: Props) {
@@ -129,6 +130,30 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
     }
   };
 
+  const [regenWindow, setRegenWindow] = useState(14);
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [regenMsg, setRegenMsg] = useState<string | null>(null);
+  const [regenMeta, setRegenMeta] = useState<RegenerateMeta | null>(null);
+
+  const handleRegenerate = async () => {
+    if (!window.confirm(
+      `将基于最近${regenWindow}天的对局弱点重新生成4周计划，\n现有进度（已完成/已跳过）会被清空。\n\n确定继续？`
+    )) return;
+    setRegenBusy(true);
+    setRegenMsg(null);
+    try {
+      const r = await api.regenerateTrainingPlan(regenWindow);
+      setActiveWeek(1);
+      await loadData();
+      setRegenMsg(r.message);
+      setRegenMeta(r.meta ?? null);
+    } catch (e) {
+      setRegenMsg(`重新生成失败：${e}`);
+    } finally {
+      setRegenBusy(false);
+    }
+  };
+
   const handleStatusChange = async (taskId: number, status: string) => {
     await api.updateTrainingTaskStatus(taskId, status);
     await loadData();
@@ -136,11 +161,51 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
 
   const weekTasks = tasks.filter((t) => t.week === activeWeek);
   const weeks = [1, 2, 3, 4];
-  const weekTitles = ["", "第1周：布局革命", "第2周：序盘过渡", "第3周：中盘减浮棋", "第4周：综合提升"];
+  // 周主题由该周任务的 category 动态推导（自适应计划的周序会变化）
+  const THEME_LABELS: Record<string, string> = {
+    "布局": "布局革命", "序盘": "序盘过渡", "中盘": "中盘减浮棋",
+    "官子": "官子收官", "综合": "综合提升",
+  };
+  const weekTheme = weekTasks[0]?.category ?? "";
+  const weekTitle = `第${activeWeek}周：${THEME_LABELS[weekTheme] || "训练"}`;
 
   return (
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
-      <h2 style={{ margin: "0 0 12px" }}>🎯 专项强化计划</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>🎯 专项强化计划</h2>
+        {hasPlan && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select value={regenWindow} onChange={(e) => setRegenWindow(Number(e.target.value))}
+              title="重新生成时统计近期对局的天数窗口"
+              style={{ fontSize: 12, padding: "4px 6px" }}>
+              {[14, 30, 60].map((d) => (
+                <option key={d} value={d}>近{d}天</option>
+              ))}
+            </select>
+            <button onClick={handleRegenerate} disabled={regenBusy}
+              style={{
+                fontSize: 13, padding: "5px 12px", cursor: regenBusy ? "wait" : "pointer",
+                border: "1px solid #fa8c16", borderRadius: 6, background: "#fff7e6",
+              }}>
+              {regenBusy ? "生成中…" : "🔄 重新生成"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {regenMsg && (
+        <div style={{
+          marginBottom: 12, padding: "8px 12px", borderRadius: 8,
+          border: "1px solid #b7eb8f", background: "#f6ffed",
+        }}>
+          <div style={{ fontSize: 13 }}>✅ {regenMsg}</div>
+          {regenMeta?.top_issues?.length ? (
+            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+              近期高频问题：{regenMeta.top_issues.slice(0, 3).map((i) => `${i.issue}(${i.count}次)`).join("、")}
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {loading ? (
         <p style={{ color: "#999" }}>加载中…</p>
@@ -310,12 +375,12 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
           </div>
 
           {/* 周标题 */}
-          <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{weekTitles[activeWeek]}</h3>
+          <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{weekTitle}</h3>
 
           {/* 本周关联棋理 */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, color: "#999" }}>本周棋理：</span>
-            {WEEK_PRINCIPLES[activeWeek]?.map((pid) => {
+            {THEME_PRINCIPLES[weekTheme]?.map((pid) => {
               const p = GO_PRINCIPLES.find((x) => x.id === pid);
               if (!p) return null;
               return (

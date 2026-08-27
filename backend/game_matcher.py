@@ -32,7 +32,6 @@ def _opponent_info(g: dict, r: dict) -> tuple[str, str, str]:
 
 
 # ===== 匹配条件 =====
-# 每种条件：label + 匹配强度函数（返回非0表示匹配，值越大越典型）
 def _cond_loss(r, g):
     return 1 if not r["reviewee_won"] else 0
 
@@ -40,33 +39,45 @@ def _cond_win(r, g):
     return 1 if r["reviewee_won"] else 0
 
 def _cond_early_contact(r, g):
-    """第1周d6：前12手贴身接触 → 布局阶段'过早接触战'"""
+    """布局期过早接触战"""
     return _phase_issue(r, "布局", "过早接触战")
 
 def _cond_rush_fight(r, g):
-    """第2周d3：序盘急于战斗"""
+    """序盘急于战斗"""
     return _phase_issue(r, "序盘", "序盘急于战斗")
 
 def _cond_floating(r, g):
-    """第2周d6/第3周d3：中腹浮棋（序盘+中盘）"""
+    """中腹浮棋（中盘+序盘）"""
     return _phase_issue(r, "中盘", "中腹浮棋风险") + _phase_issue(r, "序盘", "序盘中腹浮棋")
 
 def _cond_isolated(r, g):
-    """第3周d6：孤棋被攻击"""
-    return _phase_issue(r, "中盘", "孤棋被攻击")
+    """孤棋被攻击"""
+    return 1 if any(p.get("isolated_count") for p in r.get("phases", [])) else 0
 
 
-# 任务(week, day) → 匹配条件
-TASK_CONDITION = {
-    (1, 3): (_cond_loss, "负局"),
-    (1, 6): (_cond_early_contact, "布局期过早接触战"),
-    (2, 3): (_cond_rush_fight, "序盘急于战斗"),
-    (2, 6): (_cond_floating, "序盘中腹浮棋"),
-    (3, 3): (_cond_floating, "中盘浮棋风险"),
-    (3, 6): (_cond_isolated, "中盘孤棋被攻击"),
-    (4, 2): (_cond_loss, "负局"),
-    (4, 4): (_cond_win, "胜局"),
-}
+# 复盘任务的匹配器按任务阶段(category)驱动，主检测器权重更高，
+# 使自适应计划在任意周序下都能拿到对应主题的典型对局
+def _conditions_for_task(t: dict) -> list:
+    cat = t.get("category")
+    if t["target_module"] != "review":
+        return []
+    if cat == "布局":
+        return [(_cond_early_contact, "布局期过早接触战"), (_cond_loss, "负局")]
+    if cat == "序盘":
+        return [(_cond_rush_fight, "序盘急于战斗"), (_phase_only_float_prev, "序盘中腹浮棋")]
+    if cat == "中盘":
+        return [(_cond_isolated, "中盘孤棋被攻击"), (_cond_floating, "中盘浮棋风险")]
+    if cat == "综合":
+        # W4 的两个复盘槽位：D4 胜局总结，其余负局检查
+        if t.get("day") == 4:
+            return [(_cond_win, "胜局")]
+        return [(_cond_loss, "负局")]
+    if cat == "官子":
+        return [(_cond_loss, "负局")]
+    return []
+
+def _phase_only_float_prev(r, g):
+    return _phase_issue(r, "序盘", "序盘中腹浮棋")
 
 
 def match_games_for_tasks(store, tasks: list[dict], games: list[dict], top_n: int = 4) -> dict:
@@ -85,27 +96,34 @@ def match_games_for_tasks(store, tasks: list[dict], games: list[dict], top_n: in
 
     result: dict[int, list[dict]] = {}
     for t in tasks:
-        cond = TASK_CONDITION.get((t["week"], t["day"]))
-        if cond is None or t["target_module"] != "review":
+        conds = _conditions_for_task(t)
+        if not conds:
             continue
-        strength_fn, label = cond
         matched = []
         for g in games:
             r = reviews.get(g["id"])
             if r is None:
                 continue
-            strength = strength_fn(r, g)
-            if strength > 0:
+            strength = 0
+            label = None
+            for w_idx, (fn, lb) in enumerate(conds):
+                v = fn(r, g)
+                if v > 0 and label is None:
+                    label = lb
+                    strength += (len(conds) - w_idx) * 10 + v  # 主条件权重高
+            if strength > 0 and label:
                 opp, opp_rank, res = _opponent_info(g, r)
                 matched.append({
                     "game_id": g["id"],
-                    "date": g.get("played_date", "") or g.get("imported_at", "")[:10],
+                    "date": g.get("played_date", "") or (g.get("imported_at", "") or "")[:10],
                     "opponent": opp,
                     "opponent_rank": opp_rank,
                     "result": res,
                     "reason": label,
                     "score": strength,
                 })
+        # 分数降序；同分时近期对局优先
+        matched.sort(key=lambda m: m["date"], reverse=True)
         matched.sort(key=lambda m: m["score"], reverse=True)
         result[t["id"]] = matched[:top_n]
     return result

@@ -94,17 +94,17 @@ export const api = {
     post<AnalysisReport>("/api/review/analyze", { sgf, threshold: threshold ?? null, game_id: gameId ?? null }),
   getReviewResult: (gameId: number) => get<ReviewResultDto | null>(`/api/review/result/${gameId}`),
 
-  // AI 智能复盘（不依赖 KataGo）
+  // AI 智能复盘（不依赖 KataGo；带 gameId 时落库）
   aiReview: (sgf: string, gameId?: number) =>
-    post<{
-      black: string; white: string; black_rank: string; white_rank: string;
-      result: string; total_moves: number; board_size: number; date: string;
-      reviewee: string; reviewee_color: string; reviewee_won: boolean;
-      phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
-      key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
-      summary: string;
-      territory_estimate: { black_territory_est: number; white_territory_est: number; assessment: string; black_third_line: number; white_third_line: number; black_center: number; white_center: number };
-    }>("/api/review/ai", { sgf, game_id: gameId ?? null }),
+    post<AiReviewResult>("/api/review/ai", { sgf, game_id: gameId ?? null }),
+
+  // 已落库的 AI 复盘（联查对局元数据；无则 null）
+  getAiReviewCached: (gameId: number) =>
+    get<AiReviewResult | null>(`/api/review/ai/result/${gameId}`),
+
+  // 批量补算对局库 AI 复盘（幂等）
+  batchAiReview: () =>
+    post<{ total: number; processed: number; errors: number; cached_total: number }>("/api/review/ai/batch"),
 
   // 题库
   importTsumego: () => post<{ message: string }>("/api/problems/import-tsumego"),
@@ -167,6 +167,19 @@ export const api = {
       date_to: params.date_to ?? null,
     }),
 
+  // 野狐定时同步
+  getSyncConfig: () =>
+    get<{ config: SyncConfigDto; last_run: SyncLogDto | null }>("/api/foxwq/sync/config"),
+  setSyncConfig: (p: { enabled: boolean; nickname?: string; uid?: string; interval_hours?: number; limit_count?: number }) =>
+    put<{ ok: boolean; config: SyncConfigDto }>("/api/foxwq/sync/config", {
+      enabled: p.enabled, nickname: p.nickname ?? "", uid: p.uid ?? "",
+      interval_hours: p.interval_hours ?? 24, limit_count: p.limit_count ?? 30,
+    }),
+  runFoxwqSync: () =>
+    post<SyncRunResult>("/api/foxwq/sync/run"),
+  getSyncLogs: () =>
+    get<SyncLogDto[]>("/api/foxwq/sync/logs"),
+
   // 训练计划
   generateTrainingPlan: () =>
     post<{ message: string; task_count: number }>("/api/training/generate"),
@@ -181,6 +194,9 @@ export const api = {
   // 复盘任务的典型对局匹配：{task_id: [对局]}
   getTrainingMatches: () =>
     get<Record<number, TrainingMatchDto[]>>("/api/training/matches"),
+  // 近期问题趋势分析（强化训练闭环）
+  getTrainingInsights: (window = 10) =>
+    get<InsightsDto>(`/api/training/insights?window=${window}`),
 
   // WebSocket 流式复盘（同源，部署版自动指向服务器）
   wsReviewUrl: () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/review`,
@@ -213,4 +229,54 @@ export interface TrainingMatchDto {
   result: string;
   reason: string;
   score: number;
+}
+
+export interface AiReviewPhase {
+  phase: string; range: string; score: number;
+  comments: string[]; issues: string[];
+}
+
+export interface AiReviewResult {
+  game_id?: number;
+  black?: string; white?: string; black_rank?: string; white_rank?: string;
+  result?: string; board_size?: number; date?: string;
+  reviewee: string; reviewee_color: string; reviewee_won: boolean;
+  total_moves: number;
+  analyzed_at?: string;
+  phases: AiReviewPhase[];
+  key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
+  summary: string;
+  territory_estimate: { black_territory_est?: number; white_territory_est?: number; assessment?: string };
+  saved?: boolean;
+}
+
+export interface SyncConfigDto {
+  id: number; enabled: number; nickname: string; uid: string;
+  interval_hours: number; limit_count: number; updated_at: string | null;
+}
+
+export interface SyncLogDto {
+  id: number; started_at: string; finished_at: string | null;
+  status: string; trigger_type: string;
+  imported: number; skipped: number; failed: number; message: string;
+}
+
+export interface SyncRunResult {
+  ok: boolean; imported?: number; skipped?: number; failed?: number;
+  message?: string; ai_backfill?: number;
+}
+
+export interface InsightsDto {
+  stored_reviews: number;
+  window: number;
+  recent_count: number; prev_count: number;
+  has_data: boolean;
+  recent_date_range?: [string, string];
+  phase_trend?: Record<string, { now: number | null; previous: number | null; delta: number | null }>;
+  issue_trend?: { issue: string; recent: number; previous: number; delta: number; percentage: number }[];
+  win_rate?: { recent: number | null; previous: number | null };
+  recommendations?: {
+    issue: string; week: number; day: number; title: string;
+    description: string; target_module: string; reason: string;
+  }[];
 }

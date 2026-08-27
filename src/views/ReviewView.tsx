@@ -5,15 +5,20 @@ import { ipc } from "../lib/ipc";
 import type { AnalysisReport, BoardSnapshot, MoveAnalysisDto, ReviewResultDto } from "../types";
 
 interface AiReviewResult {
-  black: string; white: string;
-  black_rank: string; white_rank: string;
-  result: string; total_moves: number;
-  board_size: number; date: string;
+  black?: string; white?: string;
+  black_rank?: string; white_rank?: string;
+  result?: string; total_moves: number;
+  board_size?: number; date?: string;
+  reviewed_at?: string; analyzed_at?: string;
   reviewee: string; reviewee_color: string; reviewee_won: boolean;
   phases: { phase: string; range: string; score: number; comments: string[]; issues: string[] }[];
   key_moves: { move: number; color: string; point: string; type: string; issues: string[] }[];
   summary: string;
-  territory_estimate: { black_territory_est: number; white_territory_est: number; assessment: string; black_third_line: number; white_third_line: number; black_center: number; white_center: number };
+  territory_estimate: {
+    black_territory_est?: number; white_territory_est?: number; assessment?: string;
+    black_third_line?: number; white_third_line?: number;
+    black_center?: number; white_center?: number;
+  };
 }
 
 interface Props {
@@ -58,6 +63,10 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
             blunder_count: r.blunder_count, inaccuracy_count: r.inaccuracy_count, summary: r.summary,
           });
         }
+      }).catch(() => {});
+      // AI 复盘缓存预填（已落库则直接显示，无需重新计算）
+      ipc.getAiReviewCached(pendingReview.gameId).then((r) => {
+        if (r) setAiReview((prev) => prev ?? (r as AiReviewResult));
       }).catch(() => {});
     }
   }, [pendingReview]);
@@ -211,6 +220,9 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
                     <span style={{ fontSize: 12, background: "#1890ff", color: "#fff", padding: "2px 8px", borderRadius: 8 }}>
                       🎯 复盘对象：{aiReview.reviewee}（执{aiReview.reviewee_color}）· {aiReview.reviewee_won ? "胜" : "负"}
                     </span>
+                    {aiReview.analyzed_at && (
+                      <span style={{ fontSize: 11, color: "#999", marginLeft: 8 }}>🗄️ 已从存档载入</span>
+                    )}
                   </div>
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginBottom: 8 }}>
                     {/* 黑方 */}

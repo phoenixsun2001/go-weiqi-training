@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ImportedGameDto } from "../types";
+import SyncPanel from "./SyncPanel";
 
 interface Props {
   onReviewGame: (gameId: number, sgf: string) => void;
@@ -19,6 +20,7 @@ export default function LibraryView({ onReviewGame }: Props) {
 
   // 野狐导入面板状态
   const [showImportPanel, setShowImportPanel] = useState(false);
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [foxNickname, setFoxNickname] = useState("");
   const [foxUid, setFoxUid] = useState("");
   const [foxDateFrom, setFoxDateFrom] = useState("");
@@ -149,6 +151,9 @@ export default function LibraryView({ onReviewGame }: Props) {
           <button onClick={() => setShowImportPanel(!showImportPanel)} style={{ padding: "4px 12px" }}>
             {showImportPanel ? "收起导入" : "📥 野狐导入"}
           </button>
+          <button onClick={() => setShowSyncPanel(!showSyncPanel)} style={{ padding: "4px 12px" }}>
+            {showSyncPanel ? "收起同步" : "⏱ 定时同步"}
+          </button>
           <label style={{ padding: "4px 12px", background: "#333", color: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
             📁 导入SGF文件
             <input type="file" accept=".sgf" multiple style={{ display: "none" }}
@@ -156,6 +161,11 @@ export default function LibraryView({ onReviewGame }: Props) {
           </label>
         </div>
       </div>
+
+      {/* 野狐定时同步面板 */}
+      {showSyncPanel && (
+        <SyncPanel onImported={loadGames} />
+      )}
 
       {/* 野狐导入面板 */}
       {showImportPanel && (

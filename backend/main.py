@@ -99,11 +99,29 @@ class RecordGameReq(BaseModel):
 # ===== FastAPI 应用 =====
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 复盘持久化服务注入 store
+    from review_service import set_store, backfill_all
+    set_store(store)
+    # 启动时补算缺失的 AI 复盘（幂等；新库/增量导入后自动填充）
+    try:
+        bf = backfill_all(store)
+        if bf["processed"]:
+            print(f"[startup] AI复盘回填: {bf['processed']} 局, 库存 {bf['cached_total']}")
+    except Exception as e:
+        print(f"[startup] AI复盘回填失败: {e}")
+
     # 启动时 seed 题库（如果为空）
     if store.count_problems() == 0:
         seed_problems()
+
+    # 启动野狐定时同步调度器
+    from sync_scheduler import start_scheduler
+    scheduler_task = start_scheduler(store)
+
     yield
-    # 关闭时停止引擎
+
+    # 关闭时停止引擎与调度器
+    scheduler_task.cancel()
     await opponent_engine.stop()
     await analysis_engine.stop()
 
@@ -610,12 +628,54 @@ class AiReviewReq(BaseModel):
 
 @app.post("/api/review/ai")
 def ai_review_endpoint(req: AiReviewReq):
-    """AI 智能复盘：基于棋型分析，不依赖 KataGo"""
+    """AI 智能复盘：基于棋型分析，不依赖 KataGo；带 game_id 时结果落库"""
     try:
         result = review_game(req.sgf)
-        return result
     except Exception as e:
         raise HTTPException(400, f"复盘失败: {e}")
+    if req.game_id and "error" not in result and result.get("phases"):
+        try:
+            store.upsert_ai_review(req.game_id, result)
+            result["saved"] = True
+        except Exception as e:
+            print(f"[ai-review] 落库失败 game_id={req.game_id}: {e}")
+    return result
+
+
+@app.get("/api/review/ai/result/{game_id}")
+def ai_review_result(game_id: int):
+    """读取已落库的 AI 复盘（联查对局元数据；无则 None）"""
+    row = store.get_ai_review(game_id)
+    if not row:
+        return None
+    g = store.get_imported_game(game_id)
+    out = {
+        "game_id": game_id,
+        "analyzed_at": row["analyzed_at"],
+        "reviewee": row.get("reviewee", ""),
+        "reviewee_color": row.get("reviewee_color", ""),
+        "reviewee_won": bool(row.get("reviewee_won")),
+        "total_moves": row.get("total_moves", 0),
+        "phases": json.loads(row.get("phases_json") or "[]"),
+        "key_moves": json.loads(row.get("key_moves_json") or "[]"),
+        "territory_estimate": json.loads(row.get("territory_json") or "{}"),
+        "summary": row.get("summary", ""),
+    }
+    if g:
+        out.update({
+            "black": g["black_name"], "white": g["white_name"],
+            "black_rank": g["black_rank"], "white_rank": g["white_rank"],
+            "result": g["result"], "board_size": g["board_size"],
+            "date": g["played_date"],
+        })
+    return out
+
+
+@app.post("/api/review/ai/batch")
+def ai_review_batch():
+    """为对局库中所有未复盘棋谱批量补算并落库（幂等）"""
+    from review_service import backfill_all
+    return backfill_all(store)
 
 
 class FoxwqImportReq(BaseModel):
@@ -706,81 +766,74 @@ def _fetch_chess_list_paged(uid: str, lastcode: str):
 @app.post("/api/foxwq/import")
 def foxwq_import(req: FoxwqImportReq):
     """通过野狐昵称/UID批量导入棋谱（增量去重 + 时间段过滤）"""
-    import time as _time
-
-    # 获取 UID
-    if req.uid:
-        uid = req.uid
-    else:
-        if not req.nickname:
-            raise HTTPException(400, "请提供昵称或UID")
-        try:
-            user_info = query_user_by_name(req.nickname)
-        except Exception as e:
-            raise HTTPException(400, f"查询用户失败: {e}")
-        uid = user_info["uid"]
-
-    # 翻页获取棋谱列表
+    from foxwq_api import sync_import_games
     try:
-        all_chess = []
-        lastcode = "0"
-        for _ in range(10):
-            chess_list = fetch_chess_list(uid) if lastcode == "0" else _fetch_chess_list_paged(uid, lastcode)
-            if not chess_list:
-                break
-            all_chess.extend(chess_list)
-            lastcode = chess_list[-1].get("chessid", "")
-            if len(all_chess) >= req.limit * 2:
-                break
+        result = sync_import_games(
+            store,
+            nickname=req.nickname, uid=req.uid, limit=req.limit,
+            date_from=req.date_from, date_to=req.date_to,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
-        raise HTTPException(400, f"获取棋谱列表失败: {e}")
-
-    # 日期过滤 + 增量去重 + 下载导入
-    imported = 0
-    skipped = 0
-    failed = 0
-    for game in all_chess:
-        chessid = game.get("chessid", "")
-        if not chessid:
-            continue
-
-        # 日期过滤
-        dt = game.get("starttime", "")[:10]
-        if req.date_from and dt < req.date_from:
-            continue
-        if req.date_to and dt > req.date_to:
-            continue
-
-        # 增量去重
-        if store.has_chess_id(chessid):
-            skipped += 1
-            continue
-
-        # 下载 SGF
-        try:
-            sgf_content = fetch_sgf(chessid)
-            if not sgf_content or len(sgf_content) < 20:
-                failed += 1
-                continue
-            meta = parse_metadata(sgf_content)
-            if meta["move_count"] == 0:
-                failed += 1
-                continue
-            store.import_game("foxwq", meta, sgf_content, chess_id=chessid)
-            imported += 1
-            _time.sleep(0.15)
-        except Exception:
-            failed += 1
-
-        if imported >= req.limit:
-            break
-
+        raise HTTPException(400, f"导入失败: {e}")
     return {
-        "imported": imported,
-        "skipped": skipped,
-        "failed": failed,
-        "message": f"导入完成：新增 {imported} 局，跳过已存在 {skipped} 局，失败 {failed} 局"
+        **result,
+        "message": f"导入完成：新增 {result['imported']} 局，跳过已存在 {result['skipped']} 局，失败 {result['failed']} 局"
     }
+
+
+# ===== 野狐定时同步 =====
+from sync_scheduler import run_sync_once
+
+
+@app.get("/api/foxwq/sync/config")
+def get_sync_config():
+    cfg = store.get_sync_config()
+    last_logs = store.list_sync_logs(limit=1)
+    return {"config": cfg, "last_run": last_logs[0] if last_logs else None}
+
+
+class SyncConfigReq(BaseModel):
+    enabled: bool
+    nickname: str | None = None
+    uid: str | None = None
+    interval_hours: float = 24
+    limit_count: int = 30
+
+
+@app.put("/api/foxwq/sync/config")
+def put_sync_config(req: SyncConfigReq):
+    if not req.enabled and req.nickname is None:
+        pass  # 仅开关状态也允许保存
+    cfg = store.set_sync_config(
+        enabled=1 if req.enabled else 0,
+        nickname=req.nickname, uid=req.uid,
+        interval_hours=max(1, req.interval_hours),
+        limit_count=min(max(1, req.limit_count), 100),
+    )
+    return {"ok": True, "config": cfg}
+
+
+@app.post("/api/foxwq/sync/run")
+def run_foxwq_sync():
+    """立即执行一次野狐同步（同步等待结果）"""
+    import asyncio
+    result = asyncio.run(run_sync_once(store, trigger_type="manual"))
+    # 启动自动回填新导入棋谱的 AI 复盘
+    if result.get("imported", 0) > 0:
+        try:
+            from review_service import backfill_all
+            backfill = backfill_all(store)
+            result["ai_backfill"] = backfill["processed"]
+        except Exception:
+            pass
+    return result
+
+
+@app.get("/api/foxwq/sync/logs")
+def foxwq_sync_logs():
+    return store.list_sync_logs(limit=15)
 
 
 # ===== 定式学习 =====
@@ -819,12 +872,12 @@ from game_matcher import match_games_for_tasks
 
 @app.get("/api/training/matches")
 def training_matches():
-    """为训练计划中的复盘任务匹配典型对局（负局/胜局/过早接触战/序盘急于战斗/中腹浮棋/孤棋被攻击）"""
+    """为训练计划中的复盘任务匹配典型对局（优先读落库复盘，缺失自动补算）"""
     tasks = store.list_training_tasks()
     games = store.list_imported_games()
     if not tasks or not games:
         return {}
-    return match_games_for_tasks(tasks, games)
+    return match_games_for_tasks(store, tasks, games)
 
 
 @app.post("/api/training/generate")
@@ -894,11 +947,124 @@ def update_task_status(task_id: int, req: TaskStatusReq):
 
 @app.get("/api/training/weakness")
 def training_weakness():
-    """获取弱点摘要（基于对局库AI复盘）"""
-    games = store.list_imported_games()
-    if not games:
-        return {"total_games": 0, "phase_scores": {}, "weaknesses": []}
-    return get_weakness_summary(games)
+    """获取弱点摘要（基于落库的AI复盘聚合，缺失时自动补算）"""
+    from review_service import aggregate_weakness
+    return aggregate_weakness(store)
+
+
+# 近期问题 → 训练周 映射（闭环推荐用）
+ISSUE_WEEK_MAP = {
+    "开局选点低效": 1, "开局不在角部": 1, "角部占领不足": 1,
+    "二线棋过多": 1, "过早接触战": 1, "过早中腹": 2,
+    "序盘急于战斗": 2, "序盘中腹浮棋": 2,
+    "中腹浮棋风险": 3, "孤棋被攻击": 3,
+    "官子冗长": 4, "大分差": 4,
+}
+
+
+@app.get("/api/training/insights")
+def training_insights(window: int = 10):
+    """近期问题趋势分析（强化训练闭环的反馈环节）
+
+    按 played_date 倒数取最近 window 局 vs 之前 window 局：
+    - 阶段评分趋势（改善/恶化）
+    - 高频问题排行及变化
+    - 胜率变化
+    - 建议：将高频问题映射到训练计划的待完成任务
+    """
+    rows = store.list_ai_reviews_with_games()
+    total_stored = len(rows)
+    if not rows:
+        return {
+            "stored_reviews": 0, "recent_count": 0, "prev_count": 0,
+            "window": window, "has_data": False,
+        }
+
+    recent = rows[:window]
+    prev = rows[window:2 * window]
+
+    def _avg_phase(items: list[dict]) -> dict[str, float | None]:
+        acc: dict[str, list[float]] = {}
+        for r in items:
+            for ph, sc in (r.get("phase_scores") or {}).items():
+                acc.setdefault(ph, []).append(sc)
+        return {
+            ph: round(sum(v) / len(v), 1) if v else None
+            for ph, v in acc.items()
+        }
+
+    def _win_rate(items: list[dict]) -> float | None:
+        if not items:
+            return None
+        return round(sum(1 for r in items if r.get("reviewee_won")) / len(items) * 100)
+
+    from collections import Counter
+    recent_issues = Counter()
+    for r in recent:
+        for i in r.get("issues") or []:
+            recent_issues[i] += 1
+    prev_issues = Counter()
+    for r in prev:
+        for i in r.get("issues") or []:
+            prev_issues[i] += 1
+
+    issue_trend = []
+    for iss, cnt in recent_issues.most_common(8):
+        p = prev_issues.get(iss, 0)
+        issue_trend.append({
+            "issue": iss, "recent": cnt, "previous": p, "delta": cnt - p,
+            "percentage": round(cnt / len(recent) * 100),
+        })
+
+    recent_avg = _avg_phase(recent)
+    prev_avg = _avg_phase(prev)
+    phase_trend = {}
+    for ph in ["布局", "序盘", "中盘", "官子"]:
+        now_v = recent_avg.get(ph)
+        pre_v = prev_avg.get(ph)
+        phase_trend[ph] = {
+            "now": now_v, "previous": pre_v,
+            "delta": (round(now_v - pre_v, 1) if now_v is not None and pre_v is not None else None),
+        }
+
+    # 推荐任务：近3个高频问题映射到训练计划中仍待完成的任务
+    tasks = [t for t in store.list_training_tasks() if t["status"] == "pending"]
+    recommendations = []
+    seen_weeks: set[int] = set()
+    for item in issue_trend[:5]:
+        wk = ISSUE_WEEK_MAP.get(item["issue"])
+        if wk is None or wk in seen_weeks:
+            continue
+        task = next((t for t in tasks if t["week"] == wk), None)
+        if task:
+            recommendations.append({
+                "issue": item["issue"],
+                "week": wk,
+                "day": task["day"],
+                "title": task["title"],
+                "description": task["description"],
+                "target_module": task["target_module"],
+                "reason": f"最近{len(recent)}局出现{item['recent']}次",
+            })
+            seen_weeks.add(wk)
+        if len(recommendations) >= 3:
+            break
+
+    return {
+        "stored_reviews": total_stored,
+        "window": window,
+        "recent_count": len(recent),
+        "prev_count": len(prev),
+        "has_data": True,
+        "recent_date_range": [
+            min((r.get("played_date") or "") for r in recent) if recent else "",
+            max((r.get("played_date") or "") for r in recent) if recent else "",
+        ],
+        "phase_trend": phase_trend,
+        "issue_trend": issue_trend,
+        "win_rate": {"recent": _win_rate(recent), "previous": _win_rate(prev)},
+        "recommendations": recommendations,
+    }
 
 
 # ===== 棋力面板 =====

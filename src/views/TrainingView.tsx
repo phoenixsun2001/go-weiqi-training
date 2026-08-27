@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { api, TrainingMatchDto } from "../lib/api";
+import { api, TrainingMatchDto, InsightsDto } from "../lib/api";
 import { GO_PRINCIPLES } from "../data/goWisdom";
 
 interface Task {
@@ -55,6 +55,7 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
   const [concepts, setConcepts] = useState<Record<string, JosekiItem[]>>({});
   const [josekiNames, setJosekiNames] = useState<string[]>([]);
   const [games, setGames] = useState<{ id: number; sgf: string }[]>([]);
+  const [insights, setInsights] = useState<InsightsDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeWeek, setActiveWeek] = useState(1);
   const [hasPlan, setHasPlan] = useState(false);
@@ -62,7 +63,7 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskList, prog, weak, m, c, j, g] = await Promise.all([
+      const [taskList, prog, weak, m, c, j, g, ins] = await Promise.all([
         api.getTrainingTasks(),
         api.getTrainingProgress(),
         api.getTrainingWeakness(),
@@ -70,6 +71,7 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
         api.getJosekiConcepts(),
         api.getJoseki(),
         api.listImportedGames(),
+        api.getTrainingInsights(10),
       ]);
       setTasks(taskList);
       setProgress(prog);
@@ -78,6 +80,7 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
       setConcepts(c);
       setJosekiNames((j.joseki ?? []).map((x: { name: string }) => x.name));
       setGames(g);
+      setInsights(ins);
       setHasPlan(taskList.length > 0);
     } catch {
       // ignore
@@ -204,6 +207,81 @@ export default function TrainingView({ onNavigate, onReviewGame, onNavigateJosek
                   transition: "width 0.3s",
                 }} />
               </div>
+            </div>
+          )}
+
+          {/* 近期趋势洞察（强化训练闭环） */}
+          {insights?.has_data && insights.issue_trend && insights.issue_trend.length > 0 && (
+            <div style={{
+              border: "1px solid #ffd591", borderRadius: 8, padding: 12, marginBottom: 16, background: "#fffbe6",
+            }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                <strong style={{ fontSize: 14 }}>📈 近期趋势洞察</strong>
+                <span style={{ fontSize: 12, color: "#999" }}>
+                  最近 {insights.recent_count} 局 vs 前 {insights.prev_count} 局 · 库存复盘 {insights.stored_reviews} 局
+                  {insights.win_rate && insights.win_rate.recent != null && (
+                    <> · 胜率 <strong>{insights.win_rate.previous ?? "-"}%</strong> →{" "}
+                      <span style={{
+                        color: (insights.win_rate.recent - (insights.win_rate.previous ?? insights.win_rate.recent)) >= 0 ? "#389e0d" : "#cf1322",
+                      }}>{insights.win_rate.recent}%</span></>
+                  )}
+                </span>
+              </div>
+
+              {/* 阶段趋势箭头 */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                {Object.entries(insights.phase_trend || {}).map(([ph, t]) => {
+                  if (t.now == null) return null;
+                  const d = t.delta;
+                  return (
+                    <span key={ph} style={{
+                      fontSize: 12, padding: "2px 10px", borderRadius: 12,
+                      background: d == null ? "#f0f0f0" : d > 0 ? "#f6ffed" : d < 0 ? "#fff1f0" : "#f0f0f0",
+                      color: d == null ? "#666" : d > 0 ? "#389e0d" : d < 0 ? "#cf1322" : "#666",
+                    }}>
+                      {ph} {t.previous ?? "-"}→{t.now}
+                      {d != null && (d > 0 ? ` ↑${d}` : d < 0 ? ` ↓${Math.abs(d)}` : " →")}
+                    </span>
+                  );
+                })}
+              </div>
+
+              {/* 近期高频问题 */}
+              <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3, marginBottom: 8 }}>
+                {insights.issue_trend.slice(0, 5).map((it) => (
+                  <div key={it.issue} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1 }}>{it.issue}</span>
+                    <span style={{ color: "#666" }}>近{it.recent}次（前{it.previous}）</span>
+                    <span style={{
+                      width: 34, textAlign: "right",
+                      color: it.delta > 0 ? "#cf1322" : it.delta < 0 ? "#389e0d" : "#999",
+                    }}>
+                      {it.delta > 0 ? `↑${it.delta}` : it.delta < 0 ? `↓${-it.delta}` : "持平"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* 推荐聚焦任务 */}
+              {insights.recommendations && insights.recommendations.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: "#ad6800", marginBottom: 4 }}>💡 根据近期问题，建议优先完成：</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {insights.recommendations.map((rec) => (
+                      <button key={rec.title}
+                        onClick={() => setActiveWeek(rec.week)}
+                        title={rec.description}
+                        style={{
+                          fontSize: 11, padding: "3px 10px", cursor: "pointer",
+                          border: "1px solid #fa8c16", borderRadius: 12, background: "#fff",
+                        }}>
+                        第{rec.week}周D{rec.day}·{rec.title}{" "}
+                        <span style={{ color: "#fa541c" }}>({rec.reason})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

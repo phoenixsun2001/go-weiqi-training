@@ -1,4 +1,5 @@
 """SQLite 存储层：档案/对局/评级历史/题库/错题本/弱点/对局库/复盘结果"""
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -89,6 +90,41 @@ CREATE TABLE IF NOT EXISTS training_task (
     status TEXT NOT NULL DEFAULT 'pending',
     completed_at TEXT,
     sort_order INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS ai_review (
+    game_id INTEGER PRIMARY KEY,
+    analyzed_at TEXT NOT NULL,
+    reviewee TEXT DEFAULT '',
+    reviewee_color TEXT DEFAULT '',
+    reviewee_won INTEGER DEFAULT 0,
+    total_moves INTEGER DEFAULT 0,
+    phase_scores_json TEXT NOT NULL DEFAULT '{}',
+    issues_json TEXT NOT NULL DEFAULT '[]',
+    phases_json TEXT NOT NULL DEFAULT '[]',
+    key_moves_json TEXT NOT NULL DEFAULT '[]',
+    territory_json TEXT NOT NULL DEFAULT '{}',
+    summary TEXT DEFAULT '',
+    FOREIGN KEY(game_id) REFERENCES imported_game(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS foxwq_sync_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    nickname TEXT NOT NULL DEFAULT '',
+    uid TEXT NOT NULL DEFAULT '',
+    interval_hours REAL NOT NULL DEFAULT 24,
+    limit_count INTEGER NOT NULL DEFAULT 30,
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS foxwq_sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    trigger_type TEXT NOT NULL DEFAULT 'manual',
+    imported INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    message TEXT DEFAULT ''
 );
 """
 
@@ -336,3 +372,116 @@ class Store:
 
     def training_task_count(self):
         return self.conn.execute("SELECT COUNT(*) FROM training_task").fetchone()[0]
+
+    # ===== AI 复盘持久化 =====
+    def upsert_ai_review(self, game_id: int, result: dict):
+        """保存/更新 AI 棋理复盘结果（结构化列 + 全量 JSON）"""
+        phase_scores = {p["phase"]: p["score"] for p in result.get("phases", [])}
+        issues = sorted({i for p in result.get("phases", []) for i in p.get("issues", [])})
+        self.conn.execute(
+            "INSERT INTO ai_review(game_id,analyzed_at,reviewee,reviewee_color,reviewee_won,"
+            "total_moves,phase_scores_json,issues_json,phases_json,key_moves_json,territory_json,summary) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(game_id) DO UPDATE SET analyzed_at=?,reviewee=?,reviewee_color=?,reviewee_won=?,"
+            "total_moves=?,phase_scores_json=?,issues_json=?,phases_json=?,key_moves_json=?,"
+            "territory_json=?,summary=?",
+            (
+                game_id, _now(), result.get("reviewee", ""), result.get("reviewee_color", ""),
+                1 if result.get("reviewee_won") else 0, result.get("total_moves", 0),
+                json.dumps(phase_scores, ensure_ascii=False), json.dumps(issues, ensure_ascii=False),
+                json.dumps(result.get("phases", []), ensure_ascii=False),
+                json.dumps(result.get("key_moves", []), ensure_ascii=False),
+                json.dumps(result.get("territory_estimate", {}), ensure_ascii=False),
+                result.get("summary", ""),
+                _now(), result.get("reviewee", ""), result.get("reviewee_color", ""),
+                1 if result.get("reviewee_won") else 0, result.get("total_moves", 0),
+                json.dumps(phase_scores, ensure_ascii=False), json.dumps(issues, ensure_ascii=False),
+                json.dumps(result.get("phases", []), ensure_ascii=False),
+                json.dumps(result.get("key_moves", []), ensure_ascii=False),
+                json.dumps(result.get("territory_estimate", {}), ensure_ascii=False),
+                result.get("summary", ""),
+            ),
+        )
+        self.conn.commit()
+
+    def get_ai_review(self, game_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM ai_review WHERE game_id=?", (game_id,)).fetchone()
+        return dict(row) if row else None
+
+    def has_ai_review(self, game_id: int) -> bool:
+        row = self.conn.execute("SELECT 1 FROM ai_review WHERE game_id=? LIMIT 1", (game_id,)).fetchone()
+        return row is not None
+
+    def ai_review_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM ai_review").fetchone()[0]
+
+    def list_ai_reviews_with_games(self) -> list[dict]:
+        """AI 复盘 + 对局元数据联查（趋势分析用，按日期降序）"""
+        rows = self.conn.execute(
+            "SELECT a.game_id, a.analyzed_at, a.reviewee_won, a.total_moves,"
+            " a.phase_scores_json, a.issues_json,"
+            " g.played_date, g.imported_at, g.result"
+            " FROM ai_review a JOIN imported_game g ON g.id = a.game_id"
+            " ORDER BY COALESCE(NULLIF(g.played_date,''), substr(g.imported_at,1,10)) DESC"
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["phase_scores"] = json.loads(d.pop("phase_scores_json") or "{}")
+            d["issues"] = json.loads(d.pop("issues_json") or "[]")
+            out.append(d)
+        return out
+
+    # ===== 野狐定时同步 =====
+    def get_sync_config(self) -> dict:
+        row = self.conn.execute("SELECT * FROM foxwq_sync_config WHERE id=1").fetchone()
+        return dict(row) if row else {
+            "id": 1, "enabled": 0, "nickname": "", "uid": "",
+            "interval_hours": 24, "limit_count": 30, "updated_at": None,
+        }
+
+    def set_sync_config(self, enabled=None, nickname=None, uid=None,
+                        interval_hours=None, limit_count=None) -> dict:
+        cur = self.get_sync_config()
+        self.conn.execute(
+            "INSERT INTO foxwq_sync_config(id,enabled,nickname,uid,interval_hours,limit_count,updated_at)"
+            " VALUES(1,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET enabled=?,nickname=?,uid=?,interval_hours=?,limit_count=?,updated_at=?",
+            (
+                enabled if enabled is not None else cur["enabled"],
+                nickname if nickname is not None else cur["nickname"],
+                uid if uid is not None else cur["uid"],
+                interval_hours if interval_hours is not None else cur["interval_hours"],
+                limit_count if limit_count is not None else cur["limit_count"],
+                _now(),
+                enabled if enabled is not None else cur["enabled"],
+                nickname if nickname is not None else cur["nickname"],
+                uid if uid is not None else cur["uid"],
+                interval_hours if interval_hours is not None else cur["interval_hours"],
+                limit_count if limit_count is not None else cur["limit_count"],
+                _now(),
+            ),
+        )
+        self.conn.commit()
+        return self.get_sync_config()
+
+    def insert_sync_log(self, trigger_type: str = "manual") -> int:
+        cur = self.conn.execute(
+            "INSERT INTO foxwq_sync_log(started_at,status,trigger_type) VALUES(?,'running',?)",
+            (_now(), trigger_type),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def finish_sync_log(self, log_id: int, status: str, imported=0, skipped=0, failed=0, message=""):
+        self.conn.execute(
+            "UPDATE foxwq_sync_log SET finished_at=?,status=?,imported=?,skipped=?,failed=?,message=? WHERE id=?",
+            (_now(), status, imported, skipped, failed, message, log_id),
+        )
+        self.conn.commit()
+
+    def list_sync_logs(self, limit: int = 10) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM foxwq_sync_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]

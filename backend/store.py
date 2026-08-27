@@ -435,8 +435,11 @@ class Store:
     # ===== 野狐定时同步 =====
     def get_sync_config(self) -> dict:
         row = self.conn.execute("SELECT * FROM foxwq_sync_config WHERE id=1").fetchone()
-        return dict(row) if row else {
-            "id": 1, "enabled": 0, "nickname": "", "uid": "",
+        if row:
+            return dict(row)
+        # 默认配置：JadenSai，每天同步一次（enabled=0 由用户/部署显式开启）
+        return {
+            "id": 1, "enabled": 0, "nickname": "JadenSai", "uid": "",
             "interval_hours": 24, "limit_count": 30, "updated_at": None,
         }
 

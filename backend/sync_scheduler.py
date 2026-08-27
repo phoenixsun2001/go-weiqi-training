@@ -16,7 +16,12 @@ def _now() -> datetime.datetime:
 
 
 def _parse_dt(s: str) -> datetime.datetime | None:
+    """兼容 store 的 'epoch:<unix>' 时间戳与 ISO 格式"""
+    if not s:
+        return None
     try:
+        if s.startswith("epoch:"):
+            return datetime.datetime.fromtimestamp(int(s.split(":", 1)[1]))
         return datetime.datetime.fromisoformat(s)
     except Exception:
         return None
@@ -42,6 +47,18 @@ async def run_sync_once(store, trigger_type: str = "auto") -> dict:
         )
         status = "success" if result["imported"] > 0 or result["skipped"] > 0 else "empty"
         msg = f"导入{result['imported']} 跳过{result['skipped']} 失败{result['failed']}"
+
+        # 新导入棋谱自动补算 AI 复盘（闭环：导入即入分析流水线）
+        if result["imported"] > 0:
+            try:
+                from review_service import backfill_all
+                bf = await asyncio.to_thread(backfill_all, store)
+                if bf["processed"]:
+                    msg += f" AI复盘补算{bf['processed']}局"
+                    result["ai_backfill"] = bf["processed"]
+            except Exception as be:
+                print(f"[sync] 回填失败: {be}")
+
         store.finish_sync_log(log_id, status, result["imported"], result["skipped"],
                               result["failed"], msg)
         return {"ok": True, **result}

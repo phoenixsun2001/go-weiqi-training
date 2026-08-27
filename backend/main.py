@@ -817,18 +817,9 @@ def put_sync_config(req: SyncConfigReq):
 
 @app.post("/api/foxwq/sync/run")
 def run_foxwq_sync():
-    """立即执行一次野狐同步（同步等待结果）"""
+    """立即执行一次野狐同步（完成后自动补算新棋谱 AI 复盘）"""
     import asyncio
-    result = asyncio.run(run_sync_once(store, trigger_type="manual"))
-    # 启动自动回填新导入棋谱的 AI 复盘
-    if result.get("imported", 0) > 0:
-        try:
-            from review_service import backfill_all
-            backfill = backfill_all(store)
-            result["ai_backfill"] = backfill["processed"]
-        except Exception:
-            pass
-    return result
+    return asyncio.run(run_sync_once(store, trigger_type="manual"))
 
 
 @app.get("/api/foxwq/sync/logs")

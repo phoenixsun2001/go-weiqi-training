@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Board from "../components/Board";
 import { api } from "../lib/api";
+import { buildBoardSequence } from "../lib/goRules";
 import type { BoardSnapshot } from "../types";
 
 interface Joseki {
@@ -270,25 +271,4 @@ export default function JosekiView({ initialName }: Props) {
       </div>
     </div>
   );
-}
-
-function buildBoardSequence(sgf: string): BoardSnapshot[] {
-  const sizeMatch = sgf.match(/SZ\[(\d+)\]/);
-  const size = sizeMatch ? Number(sizeMatch[1]) : 19;
-  const empty: BoardSnapshot["stones"] = Array(size * size).fill(null);
-  const snapshots: BoardSnapshot[] = [{ size, stones: [...empty], turn: "black" }];
-  const re = /;([BW])\[([a-z]{2}|)\]/g;
-  let m: RegExpExecArray | null;
-  let stones = [...empty];
-  while ((m = re.exec(sgf)) !== null) {
-    const color = m[1] === "B" ? "black" : "white";
-    if (m[2].length === 2) {
-      const x = m[2].charCodeAt(0) - 97;
-      const y = m[2].charCodeAt(1) - 97;
-      if (x >= 0 && x < size && y >= 0 && y < size) stones[y * size + x] = color;
-    }
-    stones = [...stones];
-    snapshots.push({ size, stones, turn: color === "black" ? "white" : "black" });
-  }
-  return snapshots;
 }

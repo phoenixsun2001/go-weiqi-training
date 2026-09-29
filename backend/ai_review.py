@@ -196,10 +196,178 @@ def _review_opening(moves, size, sgf, reviewee_color="black", reviewee_name="棋
         score -= 1
         issues.append("过早中腹")
 
+    # 6. 定式运用检测（角部规范化 + 前缀比对）
+    # 门槛：≥4手才评论（避免巧合误报）；≥5手且复盘对象偏离才计 issue 扣分
+    deducted = False
+    for m in _detect_joseki_usage(moves, size, reviewee_color)[:2]:
+        if m["matched"] < 4:
+            continue
+        if m["full"]:
+            comments.append(
+                f"角部正确运用《{m['name']}》——前{m['matched']}手与定式一致，{reviewee_name}方向处理得当。"
+            )
+        elif m["deviator"] == reviewee_color:
+            comments.append(
+                f"《{m['name']}》进行到第{m['matched']}手后，{reviewee_name}第{m['global_idx']+1}手下在"
+                f"{_gtp(m['x'], m['y'], size)}脱离常见定式。可在定式模块对照《{m['name']}》复盘此处选择。"
+            )
+            if m["matched"] >= 5 and not deducted:
+                score -= 1
+                issues.append("脱离定式")
+                deducted = True
+        else:
+            comments.append(
+                f"对手在《{m['name']}》第{m['matched']}手后变招（第{m['global_idx']+1}手{_gtp(m['x'], m['y'], size)}），"
+                f"{reviewee_name}选择了简明应对。"
+            )
+
     if not issues:
         comments.append(f"{reviewee_name}布局基本符合围棋原理，角部占领合理。")
 
     return {"score": max(0, score), "comments": comments, "issues": issues}
+
+
+# ===== 定式运用检测 =====
+_JOSEKI_PATTERNS = None
+
+
+def _load_joseki_patterns():
+    """加载定式序列（原始坐标即可，匹配时按首手对齐）"""
+    global _JOSEKI_PATTERNS
+    if _JOSEKI_PATTERNS is not None:
+        return _JOSEKI_PATTERNS
+    pats = []
+    try:
+        from joseki_data import JOSEKI_DATA
+    except Exception:
+        _JOSEKI_PATTERNS = []
+        return []
+    for j in JOSEKI_DATA:
+        ms = re.findall(r';([BW])\[([a-s])([a-s])\]', j["moves_sgf"])
+        if len(ms) < 3:
+            continue
+        pts = [(c, ord(a) - 97, ord(b) - 97) for c, a, b in ms]
+        pats.append((j["name"], pts))
+    _JOSEKI_PATTERNS = pats
+    return pats
+
+
+def _quad_norm(c, x, y, size, quad):
+    """把全局坐标按所在角部规范化为向内 +x,+y 的局部坐标；不在该象限返回 None"""
+    half = size // 2
+    if quad == 0:      # 左下
+        if x < half and y >= half:
+            return c, x, size - 1 - y
+    elif quad == 1:    # 右下
+        if x >= half and y >= half:
+            return c, size - 1 - x, size - 1 - y
+    elif quad == 2:    # 左上
+        if x < half and y < half:
+            return c, x, y
+    else:              # 右上
+        if x >= half and y < half:
+            return c, size - 1 - x, y
+    return None
+
+
+def _quad_to_global(size, quad, nx, ny):
+    """局部坐标还原全局坐标"""
+    half = size // 2
+    if quad == 0:
+        return nx, size - 1 - ny
+    if quad == 1:
+        return size - 1 - nx, size - 1 - ny
+    if quad == 2:
+        return nx, ny
+    return size - 1 - nx, ny
+
+
+def _detect_joseki_usage(moves, size, reviewee_color, scan_limit=40):
+    """
+    扫描四个角部的开局序列，与内置定式做前缀匹配。
+    匹配策略：以双方第一手对齐平移；尝试 4 种对称（恒等/镜像x/镜像y/对角交换）；
+    颜色自动适配（对方先挂角时整条颜色取反）。
+    返回按匹配长度排序的匹配列表：
+    [{name, matched, full, deviator, global_idx, x, y}]
+    """
+    pats = _load_joseki_patterns()
+    if not pats:
+        return []
+
+    def opp(c):
+        return "W" if c == "B" else "B"
+
+    def _c_norm(c):
+        """parse_moves 返回 black/white，定式 pattern 是 B/W —— 统一为 B/W"""
+        return "B" if c in ("B", "black") else "W"
+
+    def match_one(pat, seq):
+        """返回 (matched_len, transformed_pat, flip)。双方都相对各自第一手平移后逐点比对"""
+        _, p0x, p0y = pat[0]
+        s0x, s0y = seq[0][1], seq[0][2]
+        best = (0, None, False)
+        for swap in (False, True):
+            for mx in (False, True):
+                for my in (False, True):
+                    tp = []
+                    for c, x, y in pat:
+                        dx, dy = x - p0x, y - p0y
+                        if swap:
+                            dx, dy = dy, dx
+                        if mx:
+                            dx = -dx
+                        if my:
+                            dy = -dy
+                        tp.append((c, dx, dy))
+                    flip = seq[0][0] != pat[0][0]
+                    k = 0
+                    while k < min(len(tp), len(seq)):
+                        pc, px, py = tp[k]
+                        gc, gx, gy, _ = seq[k]
+                        if (opp(pc) if flip else pc) == gc and px == gx - s0x and py == gy - s0y:
+                            k += 1
+                        else:
+                            break
+                    if k > best[0]:
+                        best = (k, tp, flip)
+        return best
+
+    results = []
+    for quad in range(4):
+        seq = []
+        for gi, (c, x, y) in enumerate(moves[:scan_limit]):
+            n = _quad_norm(_c_norm(c), x, y, size, quad)
+            if n is not None:
+                seq.append((n[0], n[1], n[2], gi))
+        if len(seq) < 4:
+            continue
+
+        best = None
+        for name, pat in pats:
+            k, tp, flip = match_one(pat, seq)
+            if k >= 3 and (best is None or k > best[0]):
+                best = (k, name, tp, flip)
+        if best is None:
+            continue
+
+        k, name, tp, flip = best
+        full = k >= len(tp)
+        if full:
+            results.append({"name": name, "matched": k, "full": True,
+                            "deviator": None, "global_idx": seq[k - 1][3], "x": 0, "y": 0})
+        elif k >= len(seq):
+            # 角部棋谱已走完而定式尚未结束：视为运用中，不计偏离
+            results.append({"name": name, "matched": k, "full": True,
+                            "deviator": None, "global_idx": seq[k - 1][3], "x": 0, "y": 0})
+        else:
+            dev_c, _, _, dev_gi = seq[k]
+            gx, gy = _quad_to_global(size, quad, seq[k][1], seq[k][2])
+            results.append({"name": name, "matched": k, "full": False,
+                            "deviator": "black" if dev_c == "B" else "white",
+                            "global_idx": dev_gi, "x": gx, "y": gy})
+
+    results.sort(key=lambda m: -m["matched"])
+    return results
 
 
 def _review_transition(moves, size, start_idx, reviewee_color="black", reviewee_name="棋手"):

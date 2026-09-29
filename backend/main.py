@@ -34,6 +34,8 @@ game_state = GameState.new(19)
 opponent_engine = KatagoEngine()
 analysis_engine = KatagoEngine()
 difficulty = 3
+# 复盘分析每命令搜索上限（780M核显约1s/次；GPU升级后可调高提升复盘精度）
+ANALYSIS_MAX_VISITS = 80
 
 
 def snapshot_stones() -> list[str | None]:
@@ -334,6 +336,11 @@ async def start_analysis_engine():
     await analysis_engine.start(binary, args)
     size = game_state.size
     await analysis_engine.command(f"boardsize {size}")
+    # 复盘分析搜索上限：弱GPU(780M)约1s/次；换强卡后可调高 ANALYSIS_MAX_VISITS
+    try:
+        await analysis_engine.command(f"kata-set-param maxVisits {ANALYSIS_MAX_VISITS}")
+    except Exception:
+        pass
     return {"running": True}
 
 
@@ -350,7 +357,7 @@ def analysis_status():
 
 @app.post("/api/review/analyze")
 async def import_and_analyze(req: AnalyzeReq):
-    """同步分析（兼容模式）"""
+    """同步分析（兼容模式）。lz-analyze 附加 maxVisits 上限，避免弱GPU上单手搜索过久"""
     moves = parse_moves(req.sgf)
     if not moves:
         raise HTTPException(400, "棋谱无着手")
@@ -368,7 +375,7 @@ async def import_and_analyze(req: AnalyzeReq):
     total = len(moves)
     for i, (color, x, y) in enumerate(moves):
         col_str = color
-        # 分析当前局面
+        # 分析当前局面（每命令 visits 上限：780M 约1s/次，7900XTX 亚秒级）
         analyze_raw = await analysis_engine.command(f"lz-analyze {col_str} 1")
         best_wr = _extract_winrate(analyze_raw)
         best_move = ""
@@ -974,7 +981,7 @@ def training_weakness():
 # 近期问题 → 训练周 映射（闭环推荐用）
 ISSUE_WEEK_MAP = {
     "开局选点低效": 1, "开局不在角部": 1, "角部占领不足": 1,
-    "二线棋过多": 1, "过早接触战": 1, "过早中腹": 2,
+    "二线棋过多": 1, "过早接触战": 1, "过早中腹": 2, "脱离定式": 1,
     "序盘急于战斗": 2, "序盘中腹浮棋": 2,
     "中腹浮棋风险": 3, "孤棋被攻击": 3,
     "官子冗长": 4, "大分差": 4,

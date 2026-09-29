@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import WinRateChart from "./WinRateChart";
 import Board from "../components/Board";
 import { ipc } from "../lib/ipc";
+import { buildBoardSequence, applyMove } from "../lib/goRules";
 import type { AnalysisReport, BoardSnapshot, MoveAnalysisDto, ReviewResultDto } from "../types";
 
 interface AiReviewResult {
@@ -42,6 +43,10 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
   const [aiReview, setAiReview] = useState<AiReviewResult | null>(null);
   const [aiReviewing, setAiReviewing] = useState(false);
 
+  // 试下模式（在当前局面基础上自由摆子探索变化，含提子）
+  const [tryMode, setTryMode] = useState(false);
+  const [tryStones, setTryStones] = useState<{ x: number; y: number; color: "black" | "white" }[]>([]);
+
   useEffect(() => {
     ipc.analysisEngineStatus().then((s) => setEngineRunning(s.running)).catch(() => {});
   }, []);
@@ -55,6 +60,8 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
       setCurrent(null);
       setError(null);
       setAiReview(null);
+      setTryMode(false);
+      setTryStones([]);
       ipc.getReviewResult(pendingReview.gameId).then((r) => {
         if (r) {
           setCachedResult(r);
@@ -120,7 +127,32 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
   // 解析 SGF 为逐步棋盘快照
   const boardSnapshots = useMemo(() => buildBoardSequence(sgf), [sgf]);
   const displayStep = current !== null ? current : (boardSnapshots.length - 1);
-  const currentSnapshot: BoardSnapshot = boardSnapshots[Math.min(displayStep, boardSnapshots.length - 1)] ?? boardSnapshots[0];
+  const baseSnapshot: BoardSnapshot = boardSnapshots[Math.min(displayStep, boardSnapshots.length - 1)] ?? boardSnapshots[0];
+
+  // 试下：在当前局面之上叠加试下棋子（走真实提子规则）
+  const currentSnapshot: BoardSnapshot = useMemo(() => {
+    if (!tryStones.length || !baseSnapshot) return baseSnapshot;
+    const { size } = baseSnapshot;
+    let stones: BoardSnapshot["stones"] = [...baseSnapshot.stones];
+    for (const s of tryStones) {
+      stones = applyMove(stones as ("black" | "white" | null)[], size, s.x, s.y, s.color);
+    }
+    return { ...baseSnapshot, stones: stones as BoardSnapshot["stones"] };
+  }, [baseSnapshot, tryStones]);
+
+  const tryNextColor: "black" | "white" =
+    tryStones.length % 2 === 0
+      ? (baseSnapshot?.turn ?? "black")
+      : (baseSnapshot?.turn === "black" ? "white" : "black");
+
+  const handleTryPlay = (x: number, y: number) => {
+    if (!tryMode || !baseSnapshot) return;
+    if (baseSnapshot.stones[y * baseSnapshot.size + x]) return;
+    setTryStones((arr) => [...arr, { x, y, color: tryNextColor }]);
+  };
+
+  const exitTryMode = () => { setTryMode(false); setTryStones([]); };
+
   const currentMove: MoveAnalysisDto | null = report && current !== null ? report.moves[current] ?? null : null;
 
   // 手数映射（当前步数之前所有棋子的手数）
@@ -185,17 +217,32 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
       {sgf && currentSnapshot && (
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 300 }}>
-            <Board snapshot={currentSnapshot} interactive={false} showCoords moveNumbers={moveNumbers} />
-            {/* 导航控件 */}
+            <Board snapshot={currentSnapshot} interactive={tryMode} onPlay={handleTryPlay} showCoords moveNumbers={moveNumbers} />
+            {/* 导航 + 试下控件 */}
             <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 8 }}>
               <button onClick={() => { setAutoPlay(false); setCurrent(0); }}>⏮</button>
               <button onClick={() => { setAutoPlay(false); setCurrent((c) => Math.max(0, (c ?? 1) - 1)); }}>◀</button>
-              <button onClick={() => setAutoPlay((p) => !p)} style={{ background: autoPlay ? "#1890ff" : undefined, color: autoPlay ? "#fff" : undefined }}>{autoPlay ? "⏸" : "▶"}</button>
+              <button onClick={() => setAutoPlay((p) => !p)} disabled={tryMode} style={{ background: autoPlay ? "#1890ff" : undefined, color: autoPlay ? "#fff" : undefined }}>{autoPlay ? "⏸" : "▶"}</button>
               <button onClick={() => { setAutoPlay(false); setCurrent((c) => Math.min(boardSnapshots.length - 1, (c ?? 0) + 1)); }}>▶</button>
               <button onClick={() => { setAutoPlay(false); setCurrent(boardSnapshots.length - 1); }}>⏭</button>
+              <span style={{ width: 1, background: "#ddd", margin: "0 4px" }} />
+              {!tryMode ? (
+                <button onClick={() => { setAutoPlay(false); setTryMode(true); }} title="在当前局面自由摆子探索变化">✋ 试下</button>
+              ) : (
+                <>
+                  <button onClick={() => setTryStones((a) => a.slice(0, -1))} disabled={!tryStones.length} title="悔一手">↩ 悔棋</button>
+                  <button onClick={() => setTryStones([])} disabled={!tryStones.length}>清空</button>
+                  <button onClick={exitTryMode} style={{ background: "#1890ff", color: "#fff", border: "none", borderRadius: 4 }}>退出试下</button>
+                </>
+              )}
             </div>
             <p style={{ textAlign: "center", fontSize: 12, color: "#666", marginTop: 4 }}>
               第 {displayStep} / {boardSnapshots.length - 1} 手
+              {tryMode && (
+                <span style={{ marginLeft: 8, color: "#1890ff" }}>
+                  试下中：接下来{tryNextColor === "black" ? "黑" : "白"}方落子（已摆{tryStones.length}手，提子自动处理）
+                </span>
+              )}
             </p>
           </div>
 
@@ -224,6 +271,15 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
                       <span style={{ fontSize: 11, color: "#999", marginLeft: 8 }}>🗄️ 已从存档载入</span>
                     )}
                   </div>
+                  {!engineRunning && (
+                    <div style={{
+                      fontSize: 11, color: "#ad6800", background: "#fffbe6",
+                      border: "1px solid #ffe58f", borderRadius: 6, padding: "4px 10px", marginBottom: 8,
+                    }}>
+                      ⚠ 本结果为<b>棋理启发式参考分析</b>（无引擎胜率数据，用于定位问题方向）。
+                      启动 KataGo 后点"KataGo 复盘"可获得逐步胜率级的严谨判断。
+                    </div>
+                  )}
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16, marginBottom: 8 }}>
                     {/* 黑方 */}
                     <div style={{ textAlign: "center", minWidth: 100, opacity: aiReview.reviewee_color === "黑" ? 1 : 0.7 }}>
@@ -354,27 +410,6 @@ export default function ReviewView({ pendingReview, onReviewed }: Props) {
       )}
     </div>
   );
-}
-
-function buildBoardSequence(sgf: string): BoardSnapshot[] {
-  const sizeMatch = sgf.match(/SZ\[(\d+)\]/);
-  const size = sizeMatch ? Number(sizeMatch[1]) : 19;
-  const empty: BoardSnapshot["stones"] = Array(size * size).fill(null);
-  const snapshots: BoardSnapshot[] = [{ size, stones: [...empty], turn: "black" }];
-  const re = /;([BW])\[([a-z]{2}|)\]/g;
-  let m: RegExpExecArray | null;
-  let stones = [...empty];
-  while ((m = re.exec(sgf)) !== null) {
-    const color = m[1] === "B" ? "black" : "white";
-    if (m[2].length === 2) {
-      const x = m[2].charCodeAt(0) - 97;
-      const y = m[2].charCodeAt(1) - 97;
-      if (x >= 0 && x < size && y >= 0 && y < size) stones[y * size + x] = color;
-    }
-    stones = [...stones];
-    snapshots.push({ size, stones, turn: color === "black" ? "white" : "black" });
-  }
-  return snapshots;
 }
 
 function kindLabel(k: MoveAnalysisDto["kind"]): string {
